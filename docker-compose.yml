@@ -1,0 +1,65 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: agro
+      POSTGRES_USER: agro
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-agro}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agro -d agro"]
+      interval: 5s
+      retries: 10
+
+  api:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://agro:${POSTGRES_PASSWORD:-agro}@db:5432/agro
+      STORAGE_DIR: /data/archivos
+    volumes:
+      - archivos:/data/archivos
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # Interfaz web: http://localhost:8080
+  web:
+    build: ./frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - api
+
+  # Desarrollo del frontend con recarga en caliente: http://localhost:5173
+  web-dev:
+    image: node:22-alpine
+    working_dir: /w
+    command: sh -c "npm install --no-audit --no-fund && npm run dev"
+    environment:
+      API_URL: http://api:8000
+    volumes:
+      - ./frontend:/w
+    ports:
+      - "5173:5173"
+    depends_on:
+      - api
+    profiles: ["dev"]
+
+  # Dashboards sin programar, conectados directo a Postgres: http://localhost:3000
+  metabase:
+    image: metabase/metabase:latest
+    ports:
+      - "3000:3000"
+    depends_on:
+      - db
+    profiles: ["dashboards"]
+
+volumes:
+  pgdata:
+  archivos:

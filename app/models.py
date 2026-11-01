@@ -1,0 +1,276 @@
+"""Modelos de la base de datos.
+
+Montos en Numeric(16, 2) para no perder centavos; cantidades y kilos con más decimales.
+"""
+
+import enum
+from datetime import date, datetime
+from decimal import Decimal
+
+from sqlalchemy import (
+    JSON,
+    Column,
+    Date,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    Table,
+    Text,
+    UniqueConstraint,
+    func,
+)
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+Monto = Numeric(16, 2)
+JsonDoc = JSON().with_variant(JSONB(), "postgresql")
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+class Timestamps:
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+# ---------------------------------------------------------------------------
+# Usuarios, roles y permisos
+# ---------------------------------------------------------------------------
+
+usuario_roles = Table(
+    "usuario_roles",
+    Base.metadata,
+    Column("usuario_id", ForeignKey("usuarios.id", ondelete="CASCADE"), primary_key=True),
+    Column("rol_id", ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True),
+)
+
+rol_permisos = Table(
+    "rol_permisos",
+    Base.metadata,
+    Column("rol_id", ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True),
+    Column("permiso_codigo", ForeignKey("permisos.codigo", ondelete="CASCADE"), primary_key=True),
+)
+
+
+class Permiso(Base):
+    __tablename__ = "permisos"
+
+    codigo: Mapped[str] = mapped_column(String(64), primary_key=True)
+    descripcion: Mapped[str] = mapped_column(String(255))
+
+
+class Rol(Base):
+    __tablename__ = "roles"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    nombre: Mapped[str] = mapped_column(String(64), unique=True)
+    descripcion: Mapped[str | None] = mapped_column(String(255))
+    permisos: Mapped[list[Permiso]] = relationship(secondary=rol_permisos, lazy="selectin")
+
+
+class Usuario(Timestamps, Base):
+    __tablename__ = "usuarios"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    nombre: Mapped[str] = mapped_column(String(255))
+    password_hash: Mapped[str] = mapped_column(String(255))
+    activo: Mapped[bool] = mapped_column(default=True)
+    roles: Mapped[list[Rol]] = relationship(secondary=usuario_roles, lazy="selectin")
+
+    @property
+    def permisos(self) -> set[str]:
+        return {p.codigo for rol in self.roles for p in rol.permisos}
+
+
+# ---------------------------------------------------------------------------
+# Catálogos
+# ---------------------------------------------------------------------------
+
+
+class Proveedor(Timestamps, Base):
+    __tablename__ = "proveedores"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    cuit: Mapped[str] = mapped_column(String(11), unique=True, index=True)
+    razon_social: Mapped[str] = mapped_column(String(255))
+    condicion_iva: Mapped[str | None] = mapped_column(String(64))
+    email: Mapped[str | None] = mapped_column(String(255))
+    telefono: Mapped[str | None] = mapped_column(String(64))
+
+
+class Campo(Timestamps, Base):
+    __tablename__ = "campos"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    nombre: Mapped[str] = mapped_column(String(128), unique=True)
+    ubicacion: Mapped[str | None] = mapped_column(String(255))
+    hectareas: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    lotes: Mapped[list["Lote"]] = relationship(back_populates="campo", cascade="all, delete-orphan")
+
+
+class Lote(Timestamps, Base):
+    __tablename__ = "lotes"
+    __table_args__ = (UniqueConstraint("campo_id", "nombre"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    campo_id: Mapped[int] = mapped_column(ForeignKey("campos.id", ondelete="CASCADE"))
+    nombre: Mapped[str] = mapped_column(String(128))
+    hectareas: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    campo: Mapped[Campo] = relationship(back_populates="lotes")
+
+
+class Campania(Timestamps, Base):
+    __tablename__ = "campanias"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    nombre: Mapped[str] = mapped_column(String(32), unique=True)  # ej. "2025/26"
+    fecha_inicio: Mapped[date]
+    fecha_fin: Mapped[date]
+
+
+class Categoria(Base):
+    """Rubro de gasto: semillas, agroquímicos, fertilizantes, combustible, fletes..."""
+
+    __tablename__ = "categorias"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    nombre: Mapped[str] = mapped_column(String(64), unique=True)
+
+
+# ---------------------------------------------------------------------------
+# Archivos y facturas
+# ---------------------------------------------------------------------------
+
+
+class Archivo(Base):
+    __tablename__ = "archivos"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    nombre_original: Mapped[str] = mapped_column(String(255))
+    content_type: Mapped[str] = mapped_column(String(128))
+    ruta: Mapped[str] = mapped_column(String(512))
+    sha256: Mapped[str] = mapped_column(String(64), unique=True)
+    tamanio: Mapped[int]
+    subido_por_id: Mapped[int | None] = mapped_column(ForeignKey("usuarios.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class EstadoFactura(str, enum.Enum):
+    procesando = "procesando"
+    pendiente_revision = "pendiente_revision"
+    confirmada = "confirmada"
+    error = "error"
+    anulada = "anulada"
+
+
+class Factura(Timestamps, Base):
+    __tablename__ = "facturas"
+    __table_args__ = (
+        UniqueConstraint("cuit_emisor", "tipo_comprobante", "punto_venta", "numero", name="uq_factura_comprobante"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    estado: Mapped[EstadoFactura] = mapped_column(
+        Enum(EstadoFactura, name="estado_factura"), default=EstadoFactura.pendiente_revision, index=True
+    )
+
+    proveedor_id: Mapped[int | None] = mapped_column(ForeignKey("proveedores.id"), index=True)
+    cuit_emisor: Mapped[str | None] = mapped_column(String(11))
+    # Código ARCA: 1=A, 6=B, 11=C, 3=NC A, etc.
+    tipo_comprobante: Mapped[int | None]
+    punto_venta: Mapped[int | None]
+    numero: Mapped[int | None]
+    fecha_emision: Mapped[date | None] = mapped_column(Date, index=True)
+    fecha_vencimiento: Mapped[date | None] = mapped_column(Date)
+
+    moneda: Mapped[str] = mapped_column(String(3), default="PES")
+    cotizacion: Mapped[Decimal] = mapped_column(Numeric(14, 6), default=1)
+    neto_gravado: Mapped[Decimal | None] = mapped_column(Monto)
+    no_gravado: Mapped[Decimal | None] = mapped_column(Monto)
+    iva: Mapped[Decimal | None] = mapped_column(Monto)
+    percepciones: Mapped[Decimal | None] = mapped_column(Monto)
+    total: Mapped[Decimal | None] = mapped_column(Monto)
+
+    cae: Mapped[str | None] = mapped_column(String(14))
+    cae_vencimiento: Mapped[date | None] = mapped_column(Date)
+
+    campania_id: Mapped[int | None] = mapped_column(ForeignKey("campanias.id"), index=True)
+    campo_id: Mapped[int | None] = mapped_column(ForeignKey("campos.id"), index=True)
+    lote_id: Mapped[int | None] = mapped_column(ForeignKey("lotes.id"))
+    categoria_id: Mapped[int | None] = mapped_column(ForeignKey("categorias.id"), index=True)
+
+    archivo_id: Mapped[int | None] = mapped_column(ForeignKey("archivos.id"))
+    datos_extraidos: Mapped[dict | None] = mapped_column(JsonDoc)  # lo que devolvió la extracción, para auditar
+    error_extraccion: Mapped[str | None] = mapped_column(Text)
+    observaciones: Mapped[str | None] = mapped_column(Text)
+    creado_por_id: Mapped[int | None] = mapped_column(ForeignKey("usuarios.id"))
+
+    proveedor: Mapped[Proveedor | None] = relationship(lazy="joined")
+    items: Mapped[list["FacturaItem"]] = relationship(
+        back_populates="factura", cascade="all, delete-orphan", order_by="FacturaItem.id", lazy="selectin"
+    )
+
+
+class FacturaItem(Base):
+    __tablename__ = "factura_items"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    factura_id: Mapped[int] = mapped_column(ForeignKey("facturas.id", ondelete="CASCADE"), index=True)
+    descripcion: Mapped[str] = mapped_column(String(512))
+    cantidad: Mapped[Decimal | None] = mapped_column(Numeric(16, 4))
+    unidad: Mapped[str | None] = mapped_column(String(32))
+    precio_unitario: Mapped[Decimal | None] = mapped_column(Numeric(16, 4))
+    alicuota_iva: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    subtotal: Mapped[Decimal | None] = mapped_column(Monto)
+    factura: Mapped[Factura] = relationship(back_populates="items")
+
+
+# ---------------------------------------------------------------------------
+# Cartas de porte
+# ---------------------------------------------------------------------------
+
+
+class EstadoCartaPorte(str, enum.Enum):
+    borrador = "borrador"
+    emitida = "emitida"
+    descargada = "descargada"
+    anulada = "anulada"
+
+
+class CartaPorte(Timestamps, Base):
+    __tablename__ = "cartas_porte"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    estado: Mapped[EstadoCartaPorte] = mapped_column(
+        Enum(EstadoCartaPorte, name="estado_carta_porte"), default=EstadoCartaPorte.borrador, index=True
+    )
+    numero_ctg: Mapped[str | None] = mapped_column(String(20), unique=True)
+    fecha_carga: Mapped[date] = mapped_column(Date, index=True)
+
+    campania_id: Mapped[int | None] = mapped_column(ForeignKey("campanias.id"), index=True)
+    campo_id: Mapped[int | None] = mapped_column(ForeignKey("campos.id"), index=True)
+    lote_id: Mapped[int | None] = mapped_column(ForeignKey("lotes.id"))
+    grano: Mapped[str] = mapped_column(String(64))  # soja, maíz, trigo...
+
+    kilos_brutos: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    kilos_tara: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    kilos_netos: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    kilos_descargados: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+
+    destino: Mapped[str | None] = mapped_column(String(255))
+    destinatario_cuit: Mapped[str | None] = mapped_column(String(11))
+    transportista_cuit: Mapped[str | None] = mapped_column(String(11))
+    chofer_cuit: Mapped[str | None] = mapped_column(String(11))
+    patente_camion: Mapped[str | None] = mapped_column(String(10))
+    patente_acoplado: Mapped[str | None] = mapped_column(String(10))
+    km_recorrer: Mapped[int | None] = mapped_column(Integer)
+    observaciones: Mapped[str | None] = mapped_column(Text)
+    creado_por_id: Mapped[int | None] = mapped_column(ForeignKey("usuarios.id"))
