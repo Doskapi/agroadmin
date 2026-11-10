@@ -1,4 +1,5 @@
-fastapi==0.115.12
+fastapi==0.162.4
+starlette==1.10.0
 uvicorn[standard]==0.34.2
 sqlalchemy==2.0.40
 psycopg[binary]==3.2.6
@@ -7,7 +8,7 @@ pydantic-settings==2.9.1
 email-validator==2.2.0
 pwdlib[argon2]==0.2.1
 pyotp==2.9.0
-python-multipart==0.0.20
+python-multipart==0.0.33
 anthropic>=0.70
 pymupdf==1.25.5
 opencv-python-headless==4.11.0.86
@@ -15,6 +16,7 @@ zxing-cpp==3.1.1
 numpy>=2.0
 openpyxl==3.1.5
 httpx==0.28.1
+sentry-sdk[fastapi]==2.19.2
 
 # tests
-pytest==8.3.5
+pytest==9.2.0

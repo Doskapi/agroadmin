@@ -36,7 +36,7 @@ def _guardar(db: DB, obj, usuario=None):
         db.commit()
     except IntegrityError:
         db.rollback()
-        raise HTTPException(409, "Ya existe un registro con esos datos")
+        raise HTTPException(409, "Ya existe un registro con esos datos") from None
     db.refresh(obj)
     return obj
 

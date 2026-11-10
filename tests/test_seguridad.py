@@ -4,12 +4,7 @@ from pydantic import ValidationError
 
 from app.config import Settings
 from tests.conftest import login
-from tests.helpers import pdf_con_qr, png_qr, url_qr
-
-
-def _importar(client, headers, data: bytes, nombre="f.pdf", tipo="application/pdf"):
-    return client.post("/facturas/importar", headers=headers, files={"archivo": (nombre, data, tipo)})
-
+from tests.helpers import importar, pdf_con_qr, png_qr, url_qr
 
 # --- Configuración ----------------------------------------------------------
 
@@ -106,32 +101,32 @@ def test_con_otro_admin_si_se_puede(client, admin):
 
 def test_tipo_se_detecta_por_contenido(client, admin):
     # un PNG que el navegador declara como PDF se guarda como imagen
-    r = _importar(client, admin, png_qr(url_qr()), "factura.pdf", "application/pdf")
+    r = importar(client, admin, png_qr(url_qr()), "factura.pdf", "application/pdf")
     assert r.status_code == 202
     fid = r.json()["id"]
     assert client.get(f"/facturas/{fid}/archivo", headers=admin).headers["content-type"] == "image/png"
 
 
 def test_archivo_disfrazado_rechazado(client, admin):
-    r = _importar(client, admin, b"<html><script>alert(1)</script></html>", "f.pdf", "application/pdf")
+    r = importar(client, admin, b"<html><script>alert(1)</script></html>", "f.pdf", "application/pdf")
     assert r.status_code == 415
 
 
 def test_pdf_danado(client, admin):
-    assert _importar(client, admin, b"%PDF-1.7\nbasura").status_code == 422
+    assert importar(client, admin, b"%PDF-1.7\nbasura").status_code == 422
 
 
 def test_pdf_con_demasiadas_paginas(client, admin):
     doc = pymupdf.open()
     for _ in range(31):
         doc.new_page()
-    assert _importar(client, admin, doc.tobytes()).status_code == 422
+    assert importar(client, admin, doc.tobytes()).status_code == 422
 
 
 def test_pdf_con_contrasena(client, admin):
     doc = pymupdf.open(stream=pdf_con_qr(url_qr()), filetype="pdf")
     data = doc.tobytes(encryption=pymupdf.PDF_ENCRYPT_AES_256, user_pw="1234", owner_pw="1234")
-    r = _importar(client, admin, data)
+    r = importar(client, admin, data)
     assert r.status_code == 422
     assert "contraseña" in r.json()["detail"]
 
@@ -139,4 +134,4 @@ def test_pdf_con_contrasena(client, admin):
 def test_archivo_demasiado_grande(client, admin, monkeypatch):
     from app.config import settings
     monkeypatch.setattr(settings, "max_upload_mb", 1)
-    assert _importar(client, admin, b"%PDF-" + b"0" * (1024 * 1024)).status_code == 413
+    assert importar(client, admin, b"%PDF-" + b"0" * (1024 * 1024)).status_code == 413

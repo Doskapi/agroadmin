@@ -14,6 +14,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -21,6 +22,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -124,6 +126,7 @@ class Auditoria(Base):
     """Quién hizo qué y cuándo. `detalle` guarda, por ejemplo, los valores anteriores y nuevos de una edición."""
 
     __tablename__ = "auditoria"
+    __table_args__ = (Index("ix_auditoria_entidad", "entidad", "entidad_id"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     fecha: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
@@ -377,3 +380,46 @@ class CartaPorte(Timestamps, Base):
     km_recorrer: Mapped[int | None] = mapped_column(Integer)
     observaciones: Mapped[str | None] = mapped_column(Text)
     creado_por_id: Mapped[int | None] = mapped_column(ForeignKey("usuarios.id"))
+
+
+# ---------------------------------------------------------------------------
+# Cola de trabajos en segundo plano
+# ---------------------------------------------------------------------------
+
+
+class EstadoTrabajo(str, enum.Enum):
+    pendiente = "pendiente"
+    en_curso = "en_curso"
+    hecho = "hecho"
+    error = "error"
+
+
+class Trabajo(Base):
+    """Tarea para el worker (ej. leer una factura importada). Sobrevive a reinicios de la API."""
+
+    __tablename__ = "trabajos"
+    # El worker busca los pendientes por fecha
+    __table_args__ = (Index("ix_trabajos_pendientes", "ejecutar_desde",
+                            postgresql_where=text("estado IN ('pendiente', 'en_curso')")),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tipo: Mapped[str] = mapped_column(String(64))
+    payload: Mapped[dict] = mapped_column(JsonDoc, default=dict)
+    estado: Mapped[EstadoTrabajo] = mapped_column(
+        Enum(EstadoTrabajo, name="estado_trabajo"), default=EstadoTrabajo.pendiente, index=True)
+    intentos: Mapped[int] = mapped_column(default=0)
+    max_intentos: Mapped[int] = mapped_column(default=5)
+    ejecutar_desde: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    bloqueado_hasta: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    error: Mapped[str | None] = mapped_column(Text)
+    creado: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    terminado: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class TareaProgramada(Base):
+    """Última ejecución de cada tarea periódica del worker (y su latido, en la fila `_latido`)."""
+
+    __tablename__ = "tareas_programadas"
+
+    nombre: Mapped[str] = mapped_column(String(64), primary_key=True)
+    ultima_ejecucion: Mapped[datetime] = mapped_column(DateTime(timezone=True))

@@ -1,6 +1,6 @@
 from app.extraccion import ia
 from tests.conftest import login
-from tests.helpers import pdf_con_qr, png_qr, url_qr
+from tests.helpers import importar, pdf_con_qr, png_qr, url_qr
 
 
 def _crear_usuario(client, admin, email, rol):
@@ -10,8 +10,6 @@ def _crear_usuario(client, admin, email, rol):
     return login(client, email, "clave-segura-1")
 
 
-def _importar(client, headers, data: bytes, nombre="f.pdf", tipo="application/pdf"):
-    return client.post("/facturas/importar", headers=headers, files={"archivo": (nombre, data, tipo)})
 
 
 # --- Auth y permisos -------------------------------------------------------
@@ -44,8 +42,8 @@ def test_permisos_por_rol(client, admin):
 
 def test_contador_confirma_pero_no_carga(client, admin):
     contador = _crear_usuario(client, admin, "conta@test.com", "contador")
-    assert _importar(client, contador, pdf_con_qr(url_qr())).status_code == 403
-    fid = _importar(client, admin, pdf_con_qr(url_qr())).json()["id"]
+    assert importar(client, contador, pdf_con_qr(url_qr())).status_code == 403
+    fid = importar(client, admin, pdf_con_qr(url_qr())).json()["id"]
     r = client.post(f"/facturas/{fid}/confirmar", headers=contador)
     assert r.status_code == 200, r.text
     assert r.json()["estado"] == "confirmada"
@@ -62,7 +60,7 @@ def test_usuario_desactivado_no_entra(client, admin):
 
 
 def test_importar_pdf_con_qr_sin_ia(client, admin):
-    r = _importar(client, admin, pdf_con_qr(url_qr()))
+    r = importar(client, admin, pdf_con_qr(url_qr()))
     assert r.status_code == 202
     f = client.get(f"/facturas/{r.json()['id']}", headers=admin).json()  # el background ya corrió
     assert f["estado"] == "pendiente_revision", f
@@ -75,7 +73,7 @@ def test_importar_pdf_con_qr_sin_ia(client, admin):
 
 
 def test_importar_imagen(client, admin):
-    r = _importar(client, admin, png_qr(url_qr()), "foto.png", "image/png")
+    r = importar(client, admin, png_qr(url_qr()), "foto.png", "image/png")
     f = client.get(f"/facturas/{r.json()['id']}", headers=admin).json()
     assert f["estado"] == "pendiente_revision"
     assert f["numero"] == 1542
@@ -83,26 +81,26 @@ def test_importar_imagen(client, admin):
 
 def test_mismo_archivo_dos_veces(client, admin):
     data = pdf_con_qr(url_qr())
-    assert _importar(client, admin, data).status_code == 202
-    assert _importar(client, admin, data).status_code == 409
+    assert importar(client, admin, data).status_code == 202
+    assert importar(client, admin, data).status_code == 409
 
 
 def test_mismo_comprobante_otro_archivo(client, admin):
-    _importar(client, admin, pdf_con_qr(url_qr()))
-    r = _importar(client, admin, png_qr(url_qr()), "foto.png", "image/png")
+    importar(client, admin, pdf_con_qr(url_qr()))
+    r = importar(client, admin, png_qr(url_qr()), "foto.png", "image/png")
     f = client.get(f"/facturas/{r.json()['id']}", headers=admin).json()
     assert f["estado"] == "error"
     assert "duplicado" in f["error_extraccion"]
 
 
 def test_sin_qr_ni_ia_queda_en_error(client, admin):
-    r = _importar(client, admin, png_qr("hola"), "x.png", "image/png")
+    r = importar(client, admin, png_qr("hola"), "x.png", "image/png")
     f = client.get(f"/facturas/{r.json()['id']}", headers=admin).json()
     assert f["estado"] == "error"
 
 
 def test_formato_no_soportado(client, admin):
-    assert _importar(client, admin, b"hola", "a.txt", "text/plain").status_code == 415
+    assert importar(client, admin, b"hola", "a.txt", "text/plain").status_code == 415
 
 
 def test_ia_mas_qr(client, admin, monkeypatch):
@@ -115,7 +113,7 @@ def test_ia_mas_qr(client, admin, monkeypatch):
         items=[ia.ItemExtraido(descripcion="Glifosato 66%", cantidad=200, unidad="lt", precio_unitario=500,
                                alicuota_iva=21, subtotal=100000)],
     ))
-    r = _importar(client, admin, pdf_con_qr(url_qr()))
+    r = importar(client, admin, pdf_con_qr(url_qr()))
     f = client.get(f"/facturas/{r.json()['id']}", headers=admin).json()
     assert f["estado"] == "pendiente_revision"
     assert f["datos_extraidos"]["fuentes"] == ["ia", "qr_arca"]
@@ -139,7 +137,7 @@ def test_confirmar_exige_datos(client, admin):
 
 
 def test_confirmada_no_se_edita(client, admin):
-    fid = _importar(client, admin, pdf_con_qr(url_qr())).json()["id"]
+    fid = importar(client, admin, pdf_con_qr(url_qr())).json()["id"]
     client.post(f"/facturas/{fid}/confirmar", headers=admin)
     assert client.patch(f"/facturas/{fid}", headers=admin, json={"total": 1}).status_code == 409
 

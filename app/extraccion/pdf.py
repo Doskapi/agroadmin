@@ -15,6 +15,6 @@ class ContenidoPDF:
 def leer_pdf(data: bytes, max_paginas: int = 2, dpi: int = 200) -> ContenidoPDF:
     with pymupdf.open(stream=data, filetype="pdf") as doc:
         texto = "\n".join(page.get_text() for page in doc)
-        links = [l["uri"] for page in doc for l in page.get_links() if l.get("uri")]
+        links = [lk["uri"] for page in doc for lk in page.get_links() if lk.get("uri")]
         paginas = [doc[i].get_pixmap(dpi=dpi).tobytes("png") for i in range(min(max_paginas, doc.page_count))]
     return ContenidoPDF(texto=texto, links=links, paginas_png=paginas)

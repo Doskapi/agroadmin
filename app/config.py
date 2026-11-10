@@ -58,8 +58,19 @@ class Settings(BaseSettings):
     # /docs y /openapi.json. Apagados en producción salvo que se pidan.
     docs_publicas: bool = False
 
+    # Logs: "texto" (legible) o "json" (para juntarlos en un sistema de logs)
+    log_formato: Literal["texto", "json"] = "texto"
+    log_nivel: str = "INFO"
+    # Errores a Sentry (opcional)
+    sentry_dsn: str | None = None
+
+    # El worker trae solo las cotizaciones del BCRA nuevas (si alguna vez se cargaron)
+    cotizaciones_automaticas: bool = True
+
     anthropic_api_key: str | None = None
     claude_model: str = "claude-opus-5-5"
+    # Esfuerzo de razonamiento: low | medium | high. Para leer facturas suele alcanzar con medium.
+    claude_effort: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
 
     @property
     def es_produccion(self) -> bool:

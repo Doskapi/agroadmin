@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: agro
+          POSTGRES_PASSWORD: agro
+          POSTGRES_DB: agro
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U agro -d agro"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql+psycopg://agro:agro@localhost:5432/agro
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt ruff==0.8.4 pip-audit==2.7.3
+      - name: Lint (ruff)
+        run: ruff check app tests
+      - name: Vulnerabilidades conocidas en dependencias (pip-audit)
+        run: pip-audit -r requirements.txt
+      - name: Migraciones sin cambios pendientes
+        run: |
+          alembic upgrade head
+          alembic check
+      - name: Tests
+        run: python -m pytest -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --no-fund
+      - name: Vulnerabilidades conocidas en dependencias (npm audit)
+        run: npm audit --audit-level=moderate
+      - name: Tests
+        run: npm test
+      - name: Tipos y build
+        run: npm run build
+
+  imagenes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Imagen de la API
+        run: docker build -t agroadmin-api .
+      - name: Imagen web
+        run: docker build -t agroadmin-web frontend
+      - name: Configuración de nginx válida
+        run: docker run --rm --add-host api:127.0.0.1 agroadmin-web nginx -t
+      - name: La API corre sin root
+        run: test "$(docker run --rm agroadmin-api id -u)" = "10001"

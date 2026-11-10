@@ -7,9 +7,8 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app import insumos, storage
+from app import insumos, storage, trabajos
 from app.auditoria import auditar
-from app.db import SessionLocal
 from app.extraccion import ia, pdf, qr_arca
 from app.models import Archivo, Categoria, EstadoFactura, Factura, FacturaItem, Proveedor
 
@@ -135,6 +134,7 @@ def procesar(db: Session, factura: Factura) -> None:
     extraido: dict = {"fuentes": []}
 
     ext: ia.FacturaExtraida | None = None
+    error_ia: ia.ErrorExtraccionIA | None = None
     if ia.disponible():
         try:
             ext = ia.extraer(data, archivo.content_type)
@@ -143,6 +143,7 @@ def procesar(db: Session, factura: Factura) -> None:
             extraido["ia"] = ext.model_dump()
         except ia.ErrorExtraccionIA as e:
             advertencias.append(str(e))
+            error_ia = e
 
     try:
         qr = _buscar_qr(data, archivo.content_type)
@@ -164,6 +165,10 @@ def procesar(db: Session, factura: Factura) -> None:
     auditar(db, None, "factura_procesada", "factura", factura.id, fuentes=extraido["fuentes"],
             advertencias=advertencias)
 
+    if not extraido["fuentes"] and error_ia and error_ia.reintentable:
+        # Sin QR y la IA falló por algo pasajero: mejor reintentar que dejarla en error
+        raise trabajos.Reintentar(str(error_ia))
+
     if not extraido["fuentes"]:
         factura.estado = EstadoFactura.error
         factura.error_extraccion = (
@@ -183,19 +188,22 @@ def procesar(db: Session, factura: Factura) -> None:
     factura.error_extraccion = None
 
 
-def procesar_en_segundo_plano(factura_id: int) -> None:
-    """Punto de entrada para BackgroundTasks (abre su propia sesión)."""
-    with SessionLocal() as db:
-        factura = db.get(Factura, factura_id)
-        if not factura:
-            return
-        try:
-            procesar(db, factura)
-            db.commit()
-        except Exception:
-            log.exception("Fallo procesando factura %s", factura_id)
-            db.rollback()
-            factura = db.get(Factura, factura_id)
-            factura.estado = EstadoFactura.error
-            factura.error_extraccion = "Error interno al procesar el archivo. Probá reprocesarlo o cargala a mano"
-            db.commit()
+@trabajos.handler("procesar_factura", al_fallar=lambda db, p: _marcar_error(db, p["factura_id"]))
+def procesar_trabajo(db: Session, payload: dict) -> None:
+    """Trabajo del worker: lee el comprobante de una factura importada."""
+    factura = db.get(Factura, payload["factura_id"])
+    if not factura or factura.estado != EstadoFactura.procesando:
+        return  # la borraron o alguien la cargó a mano mientras tanto
+    procesar(db, factura)
+
+
+def _marcar_error(db: Session, factura_id: int) -> None:
+    factura = db.get(Factura, factura_id)
+    if factura and factura.estado == EstadoFactura.procesando:
+        factura.estado = EstadoFactura.error
+        factura.error_extraccion = "Error interno al procesar el archivo. Probá reprocesarlo o cargala a mano"
+        db.commit()
+
+
+def encolar(db: Session, factura: Factura) -> None:
+    trabajos.encolar(db, "procesar_factura", {"factura_id": factura.id})

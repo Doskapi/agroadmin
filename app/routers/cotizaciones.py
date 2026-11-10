@@ -79,5 +79,5 @@ def actualizar(db: DB, desde: date | None = None, hasta: date | None = None) -> 
         valores = traer_del_bcra(desde, hasta)
     except httpx.HTTPError as e:
         log.warning("No se pudo consultar el BCRA: %s", e)
-        raise HTTPException(502, "No se pudo consultar la API del BCRA. Probá más tarde o cargalas a mano.")
+        raise HTTPException(502, "No se pudo consultar la API del BCRA. Probá más tarde o cargalas a mano.") from None
     return {"guardadas": _guardar(db, valores)}
