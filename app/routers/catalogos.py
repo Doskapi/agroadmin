@@ -53,14 +53,21 @@ def listar_proveedores(db: DB, q: str | None = None):
     return db.scalars(stmt).all()
 
 
+def _validar_proveedor(db: DB, data: ProveedorIn) -> None:
+    if data.categoria_id is not None and not db.get(Categoria, data.categoria_id):
+        raise HTTPException(422, "El rubro no existe")
+
+
 @router.post("/proveedores", response_model=ProveedorOut, status_code=201, dependencies=ESCRIBIR)
 def crear_proveedor(db: DB, data: ProveedorIn):
+    _validar_proveedor(db, data)
     return _guardar(db, Proveedor(**data.model_dump()))
 
 
 @router.put("/proveedores/{id_}", response_model=ProveedorOut, dependencies=ESCRIBIR)
 def editar_proveedor(db: DB, id_: int, data: ProveedorIn):
     obj = _obtener(db, Proveedor, id_)
+    _validar_proveedor(db, data)
     for k, v in data.model_dump().items():
         setattr(obj, k, v)
     return _guardar(db, obj)

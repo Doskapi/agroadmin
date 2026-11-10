@@ -7,7 +7,7 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app import storage
+from app import insumos, storage
 from app.db import SessionLocal
 from app.extraccion import ia, pdf, qr_arca
 from app.models import Archivo, Categoria, EstadoFactura, Factura, FacturaItem, Proveedor
@@ -66,6 +66,7 @@ def _aplicar_ia(db: Session, factura: Factura, ext: ia.FacturaExtraida) -> None:
         )
         for i in ext.items
     ]
+    insumos.autoasignar(db, factura.items)
     if ext.categoria_sugerida and not factura.categoria_id:
         cat = db.scalar(select(Categoria).where(func.lower(Categoria.nombre) == ext.categoria_sugerida.lower()))
         if cat:
@@ -107,6 +108,9 @@ def _vincular_proveedor(db: Session, factura: Factura, ext: ia.FacturaExtraida |
         db.add(proveedor)
         db.flush()
     factura.proveedor_id = proveedor.id
+    # El rubro configurado para el proveedor manda sobre lo que sugiera la IA
+    if proveedor.categoria_id:
+        factura.categoria_id = proveedor.categoria_id
 
 
 def _es_duplicada(db: Session, factura: Factura) -> Factura | None:

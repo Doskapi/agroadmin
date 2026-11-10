@@ -2,7 +2,7 @@
 
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, EmailStr, Field, field_validator
 
@@ -102,6 +102,7 @@ class ProveedorIn(BaseModel):
     condicion_iva: str | None = None
     email: str | None = None
     telefono: str | None = None
+    categoria_id: int | None = None
 
 
 class ProveedorOut(ORM, ProveedorIn):
@@ -157,9 +158,20 @@ class FacturaItemIn(BaseModel):
     precio_unitario: Decimal | None = None
     alicuota_iva: Decimal | None = None
     subtotal: Decimal | None = None
+    insumo_id: int | None = None
 
 
 class FacturaItemOut(ORM, FacturaItemIn):
+    id: int
+
+
+class ImputacionIn(BaseModel):
+    campo_id: int
+    lote_id: int | None = None
+    porcentaje: Decimal = Field(gt=0, le=100)
+
+
+class ImputacionOut(ORM, ImputacionIn):
     id: int
 
 
@@ -189,6 +201,7 @@ class FacturaBase(BaseModel):
 
 class FacturaIn(FacturaBase):
     items: list[FacturaItemIn] = []
+    imputaciones: list[ImputacionIn] = []
 
 
 class FacturaUpdate(BaseModel):
@@ -216,6 +229,8 @@ class FacturaUpdate(BaseModel):
     categoria_id: int | None = None
     observaciones: str | None = None
     items: list[FacturaItemIn] | None = None
+    # Lista vacía = sin reparto (vuelve a usar campo_id/lote_id)
+    imputaciones: list[ImputacionIn] | None = None
 
 
 class FacturaOut(ORM, FacturaBase):
@@ -226,6 +241,7 @@ class FacturaOut(ORM, FacturaBase):
     error_extraccion: str | None
     proveedor: ProveedorOut | None
     items: list[FacturaItemOut]
+    imputaciones: list[ImputacionOut] = []
     created_at: datetime
 
 
@@ -240,6 +256,38 @@ class FacturaResumen(ORM):
     numero: int | None
     total: Decimal | None
     moneda: str
+    cotizacion: Decimal
+    categoria_id: int | None = None
+    campania_id: int | None = None
+    campo_id: int | None = None
+    lote_id: int | None = None
+    repartida: bool = False
+
+    @field_validator("repartida", mode="before")
+    @classmethod
+    def _repartida(cls, v):
+        return bool(v)
+
+
+class CatalogoFacturas(BaseModel):
+    items: list[FacturaResumen]
+    total: int
+    suma_pesos: Decimal
+
+
+class AccionMasiva(BaseModel):
+    ids: list[int] = Field(min_length=1, max_length=500)
+    accion: Literal["imputar", "confirmar"]
+    # Para "imputar": solo se cambian los campos enviados
+    categoria_id: int | None = None
+    campania_id: int | None = None
+    campo_id: int | None = None
+    lote_id: int | None = None
+
+
+class ResultadoAccionMasiva(BaseModel):
+    ok: list[int]
+    errores: dict[int, str]
 
 
 # --- Cartas de porte -------------------------------------------------------
@@ -276,6 +324,7 @@ class CartaPorteOut(ORM, CartaPorteIn):
 
 
 class FilaReporte(BaseModel):
+    id: int | str | None = None  # id del rubro/proveedor/campo..., o "AAAA-MM" para meses
     clave: str | None
     cantidad: int
     total: Decimal
@@ -289,3 +338,104 @@ class ResumenDashboard(BaseModel):
     gastos_por_mes: list[FilaReporte]
     gastos_por_categoria: list[FilaReporte]
     top_proveedores: list[FilaReporte]
+
+
+class Dimension(BaseModel):
+    id: int | str | None
+    clave: str | None
+
+
+class Celda(BaseModel):
+    fila: int | str | None
+    columna: int | str | None
+    cantidad: int
+    total: Decimal
+
+
+class ReporteCruce(BaseModel):
+    filas: list[Dimension]
+    columnas: list[Dimension]
+    celdas: list[Celda]
+
+
+class FilaCostoHectarea(BaseModel):
+    campo_id: int
+    campo: str
+    lote_id: int | None
+    lote: str | None
+    hectareas: Decimal | None
+    total: Decimal
+    por_hectarea: Decimal | None
+
+
+class FilaIva(BaseModel):
+    periodo: str | None
+    cantidad: int
+    neto_gravado: Decimal
+    no_gravado: Decimal
+    iva: Decimal
+    percepciones: Decimal
+    total: Decimal
+
+
+class FaltanCotizaciones(BaseModel):
+    facturas_sin_cotizacion: int
+    primera_fecha_faltante: date | None
+
+
+# --- Insumos y cotizaciones -------------------------------------------------
+
+
+class InsumoIn(BaseModel):
+    nombre: str = Field(min_length=1, max_length=255)
+    unidad: str | None = None
+    categoria_id: int | None = None
+
+
+class InsumoOut(ORM, InsumoIn):
+    id: int
+
+
+class AsignarInsumo(BaseModel):
+    insumo_id: int | None
+    # Si es True, todos los ítems con la misma descripción (ya cargados y futuros) quedan con este insumo
+    recordar: bool = True
+
+
+class ItemSinInsumo(BaseModel):
+    descripcion: str
+    ejemplo_item_id: int
+    cantidad_items: int
+    unidad: str | None
+
+
+class ResumenInsumo(BaseModel):
+    insumo_id: int
+    insumo: str
+    unidad: str | None
+    cantidad: Decimal | None
+    total_pesos: Decimal
+    precio_promedio: Decimal | None
+    ultimo_precio: Decimal | None
+    ultima_compra: date | None
+
+
+class PrecioInsumo(BaseModel):
+    factura_id: int
+    fecha: date | None
+    proveedor: str | None
+    descripcion: str
+    cantidad: Decimal | None
+    unidad: str | None
+    precio_unitario: Decimal | None
+    moneda: str
+    precio_pesos: Decimal | None
+
+
+class CotizacionIn(BaseModel):
+    fecha: date
+    valor: Decimal = Field(gt=0)
+
+
+class CotizacionOut(ORM, CotizacionIn):
+    moneda: str

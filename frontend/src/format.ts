@@ -3,7 +3,12 @@ const arsCompacto = new Intl.NumberFormat("es-AR", { notation: "compact", maximu
 const numero = new Intl.NumberFormat("es-AR", { maximumFractionDigits: 2 });
 
 export const pesos = (v: string | number | null | undefined) => (v == null || v === "" ? "—" : ars.format(Number(v)));
+const usd = new Intl.NumberFormat("es-AR", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
+export const dolares = (v: string | number | null | undefined) => (v == null || v === "" ? "—" : usd.format(Number(v)));
+/** Formatea en la moneda en que está expresado el reporte. */
+export const enMoneda = (m: "ARS" | "USD") => (m === "USD" ? dolares : pesos);
 export const pesosCompacto = (v: number) => `$ ${arsCompacto.format(v)}`;
+export const dolaresCompacto = (v: number) => `US$ ${arsCompacto.format(v)}`;
 export const num = (v: string | number | null | undefined) => (v == null || v === "" ? "—" : numero.format(Number(v)));
 
 export function monto(v: string | null, moneda: string) {
@@ -42,3 +47,10 @@ export function comprobante(f: { tipo_comprobante: number | null; punto_venta: n
 }
 
 export const capitalizar = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+/** Primer y último día de un mes "AAAA-MM", para filtrar el catálogo. */
+export function rangoMes(clave: string) {
+  const [a, m] = clave.split("-").map(Number);
+  const ultimo = new Date(a, m, 0).getDate();
+  return { desde: `${clave}-01`, hasta: `${clave}-${String(ultimo).padStart(2, "0")}` };
+}

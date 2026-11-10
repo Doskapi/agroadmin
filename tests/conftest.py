@@ -23,7 +23,8 @@ from app.db import SessionLocal, engine  # noqa: E402
 from app.main import app  # noqa: E402
 from app.seed import seed  # noqa: E402
 
-TABLAS_DATOS = "factura_items, facturas, archivos, proveedores, cartas_porte, lotes, campos, campanias"
+TABLAS_DATOS = ("factura_imputaciones, factura_items, facturas, archivos, insumo_alias, insumos, cotizaciones, "
+                "proveedores, cartas_porte, lotes, campos, campanias")
 
 
 @pytest.fixture(scope="session", autouse=True)

@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.routers import auth, cartas_porte, catalogos, facturas, reportes, usuarios
+from app.routers import auth, cartas_porte, catalogos, cotizaciones, facturas, insumos, reportes, usuarios
 
 logging.basicConfig(level=logging.INFO)
 
@@ -28,7 +28,7 @@ if not settings.es_produccion:
         allow_headers=["*"],
     )
 
-for r in (auth, usuarios, catalogos, facturas, cartas_porte, reportes):
+for r in (auth, usuarios, catalogos, insumos, cotizaciones, facturas, cartas_porte, reportes):
     app.include_router(r.router)
 
 

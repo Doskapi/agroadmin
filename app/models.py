@@ -104,6 +104,8 @@ class Proveedor(Timestamps, Base):
     condicion_iva: Mapped[str | None] = mapped_column(String(64))
     email: Mapped[str | None] = mapped_column(String(255))
     telefono: Mapped[str | None] = mapped_column(String(64))
+    # Rubro con el que llegan sus facturas si nadie indica otro
+    categoria_id: Mapped[int | None] = mapped_column(ForeignKey("categorias.id", ondelete="SET NULL"))
 
 
 class Campo(Timestamps, Base):
@@ -217,6 +219,14 @@ class Factura(Timestamps, Base):
     items: Mapped[list["FacturaItem"]] = relationship(
         back_populates="factura", cascade="all, delete-orphan", order_by="FacturaItem.id", lazy="selectin"
     )
+    # Si tiene imputaciones, el gasto se reparte entre esos campos/lotes y se ignoran campo_id/lote_id.
+    imputaciones: Mapped[list["FacturaImputacion"]] = relationship(
+        cascade="all, delete-orphan", order_by="FacturaImputacion.id", lazy="selectin"
+    )
+
+    @property
+    def repartida(self) -> bool:
+        return bool(self.imputaciones)
 
 
 class FacturaItem(Base):
@@ -230,7 +240,55 @@ class FacturaItem(Base):
     precio_unitario: Mapped[Decimal | None] = mapped_column(Numeric(16, 4))
     alicuota_iva: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
     subtotal: Mapped[Decimal | None] = mapped_column(Monto)
+    insumo_id: Mapped[int | None] = mapped_column(ForeignKey("insumos.id", ondelete="SET NULL"), index=True)
     factura: Mapped[Factura] = relationship(back_populates="items")
+
+
+class FacturaImputacion(Base):
+    """Parte de una factura asignada a un campo (y opcionalmente a un lote)."""
+
+    __tablename__ = "factura_imputaciones"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    factura_id: Mapped[int] = mapped_column(ForeignKey("facturas.id", ondelete="CASCADE"), index=True)
+    campo_id: Mapped[int] = mapped_column(ForeignKey("campos.id"))
+    lote_id: Mapped[int | None] = mapped_column(ForeignKey("lotes.id"))
+    porcentaje: Mapped[Decimal] = mapped_column(Numeric(7, 4))
+
+
+# ---------------------------------------------------------------------------
+# Insumos y cotizaciones
+# ---------------------------------------------------------------------------
+
+
+class Insumo(Timestamps, Base):
+    """Producto normalizado (ej. "Glifosato 62%") para seguir precios y volúmenes comprados."""
+
+    __tablename__ = "insumos"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    nombre: Mapped[str] = mapped_column(String(255), unique=True)
+    unidad: Mapped[str | None] = mapped_column(String(32))
+    categoria_id: Mapped[int | None] = mapped_column(ForeignKey("categorias.id", ondelete="SET NULL"))
+
+
+class InsumoAlias(Base):
+    """Descripción de ítem (normalizada) que corresponde a un insumo: se aplica sola a los ítems nuevos."""
+
+    __tablename__ = "insumo_alias"
+
+    descripcion: Mapped[str] = mapped_column(String(512), primary_key=True)
+    insumo_id: Mapped[int] = mapped_column(ForeignKey("insumos.id", ondelete="CASCADE"), index=True)
+
+
+class Cotizacion(Base):
+    """Cotización del dólar (pesos por unidad) por día, para expresar reportes en moneda dura."""
+
+    __tablename__ = "cotizaciones"
+
+    moneda: Mapped[str] = mapped_column(String(3), primary_key=True, default="DOL")
+    fecha: Mapped[date] = mapped_column(Date, primary_key=True)
+    valor: Mapped[Decimal] = mapped_column(Numeric(14, 6))
 
 
 # ---------------------------------------------------------------------------
