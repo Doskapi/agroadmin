@@ -28,6 +28,8 @@ jobs:
           --health-interval 5s --health-timeout 5s --health-retries 10
     env:
       DATABASE_URL: postgresql+psycopg://agro:agro@localhost:5432/agro
+      # Para alembic; los tests fuerzan modo producción con sus propias claves (tests/conftest.py)
+      ENTORNO: desarrollo
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
