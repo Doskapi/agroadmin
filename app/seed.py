@@ -6,7 +6,7 @@ Uso: python -m app.seed
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.config import settings
+from app.config import password_debil, settings
 from app.db import SessionLocal
 from app.models import Categoria, Permiso, Rol, Usuario
 from app.security import PERMISOS, ROLES_INICIALES, hash_password
@@ -41,6 +41,8 @@ def seed(db: Session) -> None:
 
     email = settings.admin_email.lower()
     if not db.scalar(select(Usuario).where(Usuario.email == email)):
+        if settings.es_produccion and (motivo := password_debil(settings.admin_password)):
+            raise SystemExit(f"ADMIN_PASSWORD {motivo}. Cambiala en el .env antes de crear el administrador.")
         db.add(Usuario(email=email, nombre="Administrador", password_hash=hash_password(settings.admin_password),
                        roles=[admin_rol]))
     db.commit()

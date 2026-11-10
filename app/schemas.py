@@ -6,6 +6,7 @@ from typing import Annotated
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, EmailStr, Field, field_validator
 
+from app.config import password_debil
 from app.models import EstadoCartaPorte, EstadoFactura
 
 
@@ -50,16 +51,25 @@ class RolIn(BaseModel):
     permisos: list[str] = []
 
 
+def _password_fuerte(v: str | None) -> str | None:
+    if v is not None and (motivo := password_debil(v)):
+        raise ValueError(f"La contraseña {motivo}")
+    return v
+
+
+Password = Annotated[str, AfterValidator(_password_fuerte)]
+
+
 class UsuarioIn(BaseModel):
     email: EmailStr
     nombre: str
-    password: str = Field(min_length=8)
+    password: Password
     roles: list[str] = []
 
 
 class UsuarioUpdate(BaseModel):
     nombre: str | None = None
-    password: str | None = Field(default=None, min_length=8)
+    password: Password | None = None
     activo: bool | None = None
     roles: list[str] | None = None
 

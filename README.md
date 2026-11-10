@@ -13,11 +13,47 @@ docker compose up -d --build
 ```
 
 - **Interfaz web: http://localhost:8080** (entrar con el `ADMIN_EMAIL` / `ADMIN_PASSWORD` del `.env`)
-- API y documentación interactiva: http://localhost:8000/docs
+- Documentación interactiva de la API: http://localhost:8080/api/docs (solo con `DOCS_PUBLICAS=true`)
 - Dashboards a medida (opcional): `docker compose --profile dashboards up -d` → http://localhost:3000
-  (en Metabase, conectar a Postgres con host `db`, base `agro`, usuario `agro`)
+  (solo desde esta máquina; en Metabase, conectar a Postgres con host `db`, base `agro`, usuario `agro`)
 
 Al arrancar, el contenedor aplica las migraciones y crea permisos, roles, categorías y el usuario admin del `.env`.
+
+## Seguridad
+
+- **Claves obligatorias.** Con `ENTORNO=produccion` (el valor por defecto) la API no arranca si `SECRET_KEY`
+  falta, es de ejemplo o tiene menos de 32 caracteres, y no crea el admin si `ADMIN_PASSWORD` es débil.
+  Las contraseñas de usuarios deben tener 10 caracteres o más.
+- **Solo nginx está publicado.** La base y la API no tienen puertos abiertos: se llega a la API por `/api/*`.
+- **HTTPS.** En un servidor con dominio propio: poner `DOMINIO=agro.miempresa.com.ar` en el `.env`, abrir los
+  puertos 80 y 443 y correr `docker compose --profile https up -d`. Caddy saca y renueva el certificado solo.
+  En ese caso conviene no exponer `WEB_PUERTO` a internet (firewall).
+- **Cabeceras de seguridad** (CSP, `X-Frame-Options`, `nosniff`, HSTS con HTTPS) en todas las respuestas.
+- **Login.** Tras 5 intentos fallidos para un mismo email (o 20 desde una misma IP) en 15 minutos, el login
+  responde 429 hasta que pase la ventana. nginx además limita a 10 intentos por minuto por IP.
+- **Archivos.** El tipo se detecta por el contenido (no por lo que declara el navegador); se rechazan PDFs
+  dañados, con contraseña o de más de 30 páginas, y archivos de más de 20 MB.
+- **Siempre queda un administrador.** No se puede desactivar ni quitarle el permiso al último usuario activo
+  con `usuarios:admin`.
+
+## Backups
+
+El servicio `backup` hace una copia al arrancar y después una por día (a las `BACKUP_HORA`, hora de Argentina)
+en `./backups`: la base (`agro_FECHA.dump`) y los archivos de facturas (`archivos_FECHA.tar.gz`). Borra las de
+más de `BACKUP_DIAS` días. **Copiá esa carpeta a otro lugar** (otro disco, la nube): si se rompe el servidor,
+un backup en el mismo disco no sirve.
+
+```bash
+# copia ahora mismo
+docker compose run --rm backup ahora
+
+# restaurar la base
+docker compose exec -T db pg_restore -U agro -d agro --clean --if-exists < backups/agro_FECHA.dump
+
+# restaurar los archivos
+docker compose run --rm --entrypoint sh -v agroadmin_archivos:/data/archivos backup \
+  -c "tar xzf /backups/archivos_FECHA.tar.gz -C /data"
+```
 
 ## Cómo se carga una factura
 
@@ -60,6 +96,8 @@ Los roles se editan con `PUT /roles/{nombre}` (lista de permisos en `GET /permis
 ## Desarrollo
 
 ```bash
+# en tu máquina podés poner ENTORNO=desarrollo en el .env para usar claves de prueba
+
 # tests (usan una base agro_test aparte, con las migraciones reales)
 docker compose run --rm -v "$PWD:/app" api python -m pytest -q
 
@@ -84,9 +122,13 @@ app/
   security.py        contraseñas, JWT, catálogo de permisos y roles iniciales
   deps.py            usuario actual y `requiere("permiso")`
   seed.py            datos iniciales
+  limite_login.py    bloqueo de intentos de login fallidos
+  validar_archivo.py tipo real, tamaño y páginas de los archivos subidos
   routers/           endpoints por módulo
   extraccion/        QR de ARCA, PDF, Claude y el pipeline que los combina
 alembic/             migraciones
+scripts/backup.sh    copias diarias (servicio `backup`)
+Caddyfile            HTTPS (perfil `https`)
 tests/
 frontend/
   src/pages/         Dashboard, Facturas, FacturaDetalle (revisión), CartasPorte, Reportes, Catalogos, Usuarios

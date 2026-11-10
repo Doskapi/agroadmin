@@ -1,11 +1,14 @@
 """Extracción de datos de facturas con Claude (PDF o imagen -> JSON validado)."""
 
 import base64
+import logging
 
 import anthropic
 from pydantic import BaseModel, Field
 
 from app.config import settings
+
+log = logging.getLogger(__name__)
 
 TIPOS_IMAGEN = {"image/jpeg", "image/png", "image/gif", "image/webp"}
 
@@ -88,7 +91,8 @@ def extraer(data: bytes, content_type: str) -> FacturaExtraida:
     except anthropic.RateLimitError as e:
         raise ErrorExtraccionIA("Límite de uso de la API de Claude alcanzado, reintentar más tarde") from e
     except anthropic.APIStatusError as e:
-        raise ErrorExtraccionIA(f"Error de la API de Claude ({e.status_code}): {e.message}") from e
+        log.error("Error de la API de Claude (%s): %s", e.status_code, e.message)
+        raise ErrorExtraccionIA(f"Error de la API de Claude ({e.status_code}), reintentar más tarde") from e
     except anthropic.APIConnectionError as e:
         raise ErrorExtraccionIA("No se pudo conectar con la API de Claude") from e
 

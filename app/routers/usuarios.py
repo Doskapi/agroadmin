@@ -1,8 +1,8 @@
 from fastapi import APIRouter, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.deps import DB, requiere
-from app.models import Permiso, Rol, Usuario
+from app.models import Permiso, Rol, Usuario, rol_permisos, usuario_roles
 from app.schemas import RolIn, RolOut, UsuarioIn, UsuarioOut, UsuarioUpdate
 from app.security import PERMISOS, hash_password
 
@@ -15,6 +15,22 @@ def _roles(db: DB, nombres: list[str]) -> list[Rol]:
     if faltan:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"Roles inexistentes: {sorted(faltan)}")
     return roles
+
+
+def _commit_sin_perder_admin(db: DB) -> None:
+    """Guarda los cambios salvo que dejen al sistema sin ningún usuario activo que pueda administrar."""
+    db.flush()
+    admins = db.scalar(
+        select(func.count(func.distinct(Usuario.id)))
+        .join(usuario_roles, usuario_roles.c.usuario_id == Usuario.id)
+        .join(rol_permisos, rol_permisos.c.rol_id == usuario_roles.c.rol_id)
+        .where(Usuario.activo, rol_permisos.c.permiso_codigo == "usuarios:admin")
+    )
+    if not admins:
+        db.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "El cambio dejaría al sistema sin ningún administrador activo")
+    db.commit()
 
 
 @router.get("/usuarios", response_model=list[UsuarioOut])
@@ -47,7 +63,7 @@ def editar_usuario(db: DB, usuario_id: int, data: UsuarioUpdate):
         usuario.activo = data.activo
     if data.roles is not None:
         usuario.roles = _roles(db, data.roles)
-    db.commit()
+    _commit_sin_perder_admin(db)
     return usuario
 
 
@@ -71,5 +87,5 @@ def guardar_rol(db: DB, nombre: str, data: RolIn):
     rol.descripcion = data.descripcion
     rol.permisos = list(db.scalars(select(Permiso).where(Permiso.codigo.in_(data.permisos))))
     db.add(rol)
-    db.commit()
+    _commit_sin_perder_admin(db)
     return rol

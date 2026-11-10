@@ -9,6 +9,8 @@ os.environ["STORAGE_DIR"] = tempfile.mkdtemp()
 os.environ["ANTHROPIC_API_KEY"] = ""
 os.environ["ADMIN_EMAIL"] = "admin@test.com"
 os.environ["ADMIN_PASSWORD"] = "admin-test-1234"
+os.environ["SECRET_KEY"] = "clave-de-tests-" + "x" * 32
+os.environ["ENTORNO"] = "produccion"  # los tests corren con las mismas validaciones que producción
 
 import pytest  # noqa: E402
 from alembic import command  # noqa: E402
@@ -16,6 +18,7 @@ from alembic.config import Config  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from sqlalchemy import create_engine, text  # noqa: E402
 
+from app import limite_login  # noqa: E402
 from app.db import SessionLocal, engine  # noqa: E402
 from app.main import app  # noqa: E402
 from app.seed import seed  # noqa: E402
@@ -39,6 +42,7 @@ def base_de_datos():
 
 @pytest.fixture(autouse=True)
 def limpiar():
+    limite_login.reiniciar()
     yield
     with engine.begin() as c:
         c.execute(text(f"TRUNCATE {TABLAS_DATOS} RESTART IDENTITY CASCADE"))

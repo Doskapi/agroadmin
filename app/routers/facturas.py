@@ -5,16 +5,13 @@ from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from app import storage
-from app.config import settings
+from app import storage, validar_archivo
 from app.deps import DB, requiere
-from app.extraccion import ia, pipeline
+from app.extraccion import pipeline
 from app.models import Archivo, EstadoFactura, Factura, FacturaItem, Usuario
 from app.schemas import FacturaIn, FacturaOut, FacturaResumen, FacturaUpdate
 
 router = APIRouter(prefix="/facturas", tags=["facturas"])
-
-TIPOS_ACEPTADOS = {"application/pdf"} | ia.TIPOS_IMAGEN
 
 
 def _obtener(db: DB, factura_id: int) -> Factura:
@@ -82,12 +79,8 @@ async def importar(
 ):
     """Sube un PDF o imagen de factura. La extracción corre en segundo plano:
     consultar `GET /facturas/{id}` hasta que el estado deje de ser `procesando`."""
-    content_type = (archivo.content_type or "").split(";")[0]
-    if content_type not in TIPOS_ACEPTADOS:
-        raise HTTPException(415, f"Formato no soportado ({content_type}). Usar PDF, JPG, PNG o WEBP")
-    data = await archivo.read()
-    if len(data) > settings.max_upload_mb * 1024 * 1024:
-        raise HTTPException(413, f"El archivo supera {settings.max_upload_mb} MB")
+    data = await validar_archivo.leer_con_limite(archivo)
+    content_type = validar_archivo.validar_factura(data)  # tipo real, no el que declara el navegador
 
     digest = storage.sha256(data)
     existente = db.scalar(select(Archivo).where(Archivo.sha256 == digest))

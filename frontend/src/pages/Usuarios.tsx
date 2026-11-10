@@ -85,7 +85,7 @@ function FormUsuario({ u, roles, esYo, onClose }: { u: Usuario | null; roles: Ro
           <Field label="Nombre"><input required value={f.nombre} onChange={(e) => setF({ ...f, nombre: e.target.value })} /></Field>
           <Field label="Email"><input type="email" required disabled={!!u} value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></Field>
           <Field label={u ? "Nueva contraseña (opcional)" : "Contraseña"}>
-            <input type="password" autoComplete="new-password" minLength={8} required={!u} value={f.password}
+            <input type="password" autoComplete="new-password" minLength={10} required={!u} value={f.password}
               onChange={(e) => setF({ ...f, password: e.target.value })} />
           </Field>
         </div>

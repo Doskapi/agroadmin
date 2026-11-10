@@ -185,10 +185,10 @@ def procesar_en_segundo_plano(factura_id: int) -> None:
         try:
             procesar(db, factura)
             db.commit()
-        except Exception as e:
+        except Exception:
             log.exception("Fallo procesando factura %s", factura_id)
             db.rollback()
             factura = db.get(Factura, factura_id)
             factura.estado = EstadoFactura.error
-            factura.error_extraccion = f"Error interno: {e}"
+            factura.error_extraccion = "Error interno al procesar el archivo. Probá reprocesarlo o cargala a mano"
             db.commit()

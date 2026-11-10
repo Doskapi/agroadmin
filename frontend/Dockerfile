@@ -7,4 +7,5 @@ RUN npm run build
 
 FROM nginx:1.27-alpine
 COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY snippets/ /etc/nginx/snippets/
 COPY --from=build /w/dist /usr/share/nginx/html
