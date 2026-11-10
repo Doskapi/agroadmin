@@ -28,9 +28,41 @@ Cuit = Annotated[str, AfterValidator(_solo_digitos)]
 # --- Auth / usuarios -------------------------------------------------------
 
 
-class Token(BaseModel):
-    access_token: str
+class LoginOut(BaseModel):
+    # Solo para clientes de la API; el navegador usa la cookie de sesión.
+    access_token: str | None = None
     token_type: str = "bearer"
+    requiere_2fa: bool = False
+    desafio: str | None = None
+
+
+class Login2FA(BaseModel):
+    desafio: str
+    codigo: str = Field(min_length=6, max_length=10)
+
+
+class CodigoIn(BaseModel):
+    codigo: str = Field(min_length=6, max_length=10)
+
+
+class Desactivar2FA(BaseModel):
+    password: str
+    codigo: str = Field(min_length=6, max_length=10)
+
+
+class Inicio2FA(BaseModel):
+    secreto: str
+    uri: str
+    qr_png: str  # base64
+
+
+class SesionOut(ORM):
+    id: int
+    creada: datetime
+    ultima_actividad: datetime
+    ip: str | None
+    user_agent: str | None
+    actual: bool = False
 
 
 class RolOut(ORM):
@@ -67,6 +99,20 @@ class UsuarioIn(BaseModel):
     roles: list[str] = []
 
 
+class CambiarPassword(BaseModel):
+    actual: str
+    nueva: Password
+
+
+class Recuperar(BaseModel):
+    email: str = Field(max_length=255)
+
+
+class Restablecer(BaseModel):
+    token: str
+    nueva: Password
+
+
 class UsuarioUpdate(BaseModel):
     nombre: str | None = None
     password: Password | None = None
@@ -79,6 +125,7 @@ class UsuarioOut(ORM):
     email: str
     nombre: str
     activo: bool
+    totp_activo: bool = False
     roles: list[str]
     permisos: list[str]
 
@@ -91,6 +138,10 @@ class UsuarioOut(ORM):
     @classmethod
     def _ordenar(cls, v):
         return sorted(v)
+
+
+class UsuarioYo(UsuarioOut):
+    debe_activar_2fa: bool = False
 
 
 # --- Catálogos -------------------------------------------------------------
@@ -439,3 +490,27 @@ class CotizacionIn(BaseModel):
 
 class CotizacionOut(ORM, CotizacionIn):
     moneda: str
+
+
+# --- Auditoría -----------------------------------------------------------------
+
+
+class AuditoriaOut(ORM):
+    id: int
+    fecha: datetime
+    usuario_id: int | None
+    usuario: str | None = None
+    accion: str
+    entidad: str | None
+    entidad_id: str | None
+    detalle: dict | None
+    ip: str | None
+
+
+class PaginaAuditoria(BaseModel):
+    items: list[AuditoriaOut]
+    total: int
+
+
+class AnularIn(BaseModel):
+    motivo: str = Field(min_length=3, max_length=500)

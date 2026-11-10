@@ -1,22 +1,10 @@
-/** Cliente HTTP: agrega el token y convierte errores de la API en mensajes legibles. */
+/** Cliente HTTP. La sesión viaja en una cookie httpOnly que pone el servidor (JavaScript no la ve). */
 
-const TOKEN_KEY = "agro_token";
-
-export function getToken(): string | null {
-  try {
-    return localStorage.getItem(TOKEN_KEY);
-  } catch {
-    return null;
-  }
-}
-
-export function setToken(token: string | null) {
-  try {
-    if (token) localStorage.setItem(TOKEN_KEY, token);
-    else localStorage.removeItem(TOKEN_KEY);
-  } catch {
-    /* sin almacenamiento: la sesión dura lo que la pestaña */
-  }
+// Versiones anteriores guardaban el token en localStorage: se borra para no dejarlo expuesto.
+try {
+  localStorage.removeItem("agro_token");
+} catch {
+  /* sin almacenamiento */
 }
 
 export class ApiError extends Error {
@@ -39,18 +27,19 @@ function mensajeDeError(body: unknown, status: number): string {
       .map((d: { loc?: unknown[]; msg?: string }) => `${(d.loc ?? []).slice(1).join(".")}: ${d.msg}`)
       .join("; ");
   }
+  if (status === 502 || status === 503) return "El servidor no responde. Probá de nuevo en un momento";
   return `Error ${status}`;
 }
 
 async function request(path: string, init: RequestInit = {}): Promise<Response> {
   const headers = new Headers(init.headers);
-  const token = getToken();
-  if (token) headers.set("Authorization", `Bearer ${token}`);
+  // La API exige este header en los pedidos con cookie que modifican datos (protección contra CSRF)
+  headers.set("X-Requested-With", "agroadmin");
   if (init.body && !(init.body instanceof FormData) && !(init.body instanceof URLSearchParams)) {
     headers.set("Content-Type", "application/json");
   }
-  const res = await fetch(`/api${path}`, { ...init, headers });
-  if (res.status === 401 && token) onUnauthorized();
+  const res = await fetch(`/api${path}`, { ...init, headers, credentials: "same-origin" });
+  if (res.status === 401 && !path.startsWith("/auth/login")) onUnauthorized();
   if (!res.ok) {
     const body = await res.json().catch(() => null);
     throw new ApiError(res.status, mensajeDeError(body, res.status));
@@ -61,7 +50,7 @@ async function request(path: string, init: RequestInit = {}): Promise<Response> 
 export async function api<T>(path: string, init: RequestInit & { json?: unknown } = {}): Promise<T> {
   const { json, ...rest } = init;
   const res = await request(path, json !== undefined ? { ...rest, body: JSON.stringify(json) } : rest);
-  if (res.status === 204) return undefined as T;
+  if (res.status === 204 || res.status === 202 && res.headers.get("content-length") === "0") return undefined as T;
   return res.json();
 }
 

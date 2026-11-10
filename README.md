@@ -51,6 +51,21 @@ Al arrancar, el contenedor aplica las migraciones y crea permisos, roles, catego
   responde 429 hasta que pase la ventana. nginx además limita a 10 intentos por minuto por IP.
 - **Archivos.** El tipo se detecta por el contenido (no por lo que declara el navegador); se rechazan PDFs
   dañados, con contraseña o de más de 30 páginas, y archivos de más de 20 MB.
+- **Sesiones del lado del servidor.** El navegador guarda la sesión en una cookie httpOnly (`SameSite=Strict`,
+  `Secure` con HTTPS); los pedidos que modifican datos exigen el header `X-Requested-With`. Las sesiones vencen tras
+  `ACCESS_TOKEN_MINUTES` sin uso (y a las `SESION_MAXIMA_HORAS` como máximo) y se pueden cerrar desde "Mi cuenta".
+  Cambiar la contraseña o desactivar un usuario cierra sus sesiones. Para clientes de la API, `POST /auth/login`
+  sin `X-Requested-With` devuelve el token para usar como `Authorization: Bearer`.
+- **Verificación en dos pasos** (TOTP: Google Authenticator, Authy, 1Password…). Es obligatoria para quienes tengan
+  los permisos de `EXIGIR_2FA` (por defecto, administradores y quienes confirman facturas): hasta configurarla no
+  pueden usar el sistema. Si alguien pierde el celular, un administrador la reinicia desde Usuarios.
+- **Recuperación de contraseña** por correo (link de un solo uso, válido 1 hora). Requiere `SMTP_HOST` y `URL_PUBLICA`.
+- **Auditoría**: quién ingresó, creó, editó (con valores anteriores y nuevos), confirmó o anuló cada factura, cambios
+  de usuarios, roles y catálogos. Anular pide un motivo. Se consulta en "Auditoría" (permiso `auditoria:ver`, que
+  tienen admin y contador) y en el historial de cada factura.
+- **Contenedores:** la API corre con un usuario sin privilegios y las imágenes tienen versiones fijas.
+- **Usuario de solo lectura para Metabase:** con `LECTOR_DB_PASSWORD` en el `.env`, al arrancar se crea el usuario
+  `lector` de Postgres, que puede leer todo salvo contraseñas, sesiones y tokens.
 - **Siempre queda un administrador.** No se puede desactivar ni quitarle el permiso al último usuario activo
   con `usuarios:admin`.
 

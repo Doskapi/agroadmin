@@ -83,11 +83,56 @@ class Usuario(Timestamps, Base):
     nombre: Mapped[str] = mapped_column(String(255))
     password_hash: Mapped[str] = mapped_column(String(255))
     activo: Mapped[bool] = mapped_column(default=True)
+    # Verificación en dos pasos (TOTP). El secreto se guarda al iniciar el alta y se activa al confirmar un código.
+    totp_secreto: Mapped[str | None] = mapped_column(String(64))
+    totp_activo: Mapped[bool] = mapped_column(default=False, server_default="false")
+    totp_ultimo_paso: Mapped[int | None] = mapped_column()  # evita reusar el mismo código
     roles: Mapped[list[Rol]] = relationship(secondary=usuario_roles, lazy="selectin")
 
     @property
     def permisos(self) -> set[str]:
         return {p.codigo for rol in self.roles for p in rol.permisos}
+
+
+class Sesion(Base):
+    """Sesión iniciada. El token solo lo tiene el navegador (cookie); acá se guarda su hash."""
+
+    __tablename__ = "sesiones"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id", ondelete="CASCADE"), index=True)
+    creada: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    ultima_actividad: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    expira: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    revocada: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    ip: Mapped[str | None] = mapped_column(String(64))
+    user_agent: Mapped[str | None] = mapped_column(String(255))
+
+
+class TokenRecuperacion(Base):
+    __tablename__ = "tokens_recuperacion"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id", ondelete="CASCADE"))
+    expira: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    usado: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class Auditoria(Base):
+    """Quién hizo qué y cuándo. `detalle` guarda, por ejemplo, los valores anteriores y nuevos de una edición."""
+
+    __tablename__ = "auditoria"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    fecha: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    usuario_id: Mapped[int | None] = mapped_column(ForeignKey("usuarios.id", ondelete="SET NULL"), index=True)
+    accion: Mapped[str] = mapped_column(String(64), index=True)
+    entidad: Mapped[str | None] = mapped_column(String(64))
+    entidad_id: Mapped[str | None] = mapped_column(String(64))
+    detalle: Mapped[dict | None] = mapped_column(JsonDoc)
+    ip: Mapped[str | None] = mapped_column(String(64))
 
 
 # ---------------------------------------------------------------------------

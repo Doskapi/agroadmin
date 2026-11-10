@@ -9,15 +9,40 @@ export type Permiso =
   | "facturas:confirmar"
   | "cartas_porte:leer"
   | "cartas_porte:escribir"
-  | "reportes:ver";
+  | "reportes:ver"
+  | "auditoria:ver";
 
 export interface Usuario {
   id: number;
   email: string;
   nombre: string;
   activo: boolean;
+  totp_activo: boolean;
   roles: string[];
   permisos: Permiso[];
+  /** Solo en /auth/yo: su rol exige verificación en dos pasos y todavía no la activó */
+  debe_activar_2fa?: boolean;
+}
+
+export interface SesionInfo {
+  id: number;
+  creada: string;
+  ultima_actividad: string;
+  ip: string | null;
+  user_agent: string | null;
+  actual: boolean;
+}
+
+export interface EntradaAuditoria {
+  id: number;
+  fecha: string;
+  usuario_id: number | null;
+  usuario: string | null;
+  accion: string;
+  entidad: string | null;
+  entidad_id: string | null;
+  detalle: Record<string, unknown> | null;
+  ip: string | null;
 }
 
 export interface Rol {
