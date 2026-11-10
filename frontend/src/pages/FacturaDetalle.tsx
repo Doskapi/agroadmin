@@ -5,12 +5,13 @@ import { api, apiBlob } from "../api";
 import { useAuth } from "../auth";
 import { BadgeFactura, Cargando, ErrorMsg, Field, nullSiVacio, numOrNull } from "../components/ui";
 import { comprobante, fecha, pesos, TIPOS_COMPROBANTE } from "../format";
-import { useCampanias, useCampos, useCategorias, useProveedores } from "../hooks";
-import type { Factura, FacturaCampos, FacturaItem } from "../types";
+import { porId, useCampanias, useCampos, useCategorias, useInsumos, useProveedores } from "../hooks";
+import type { Factura, FacturaCampos, FacturaItem, Imputacion } from "../types";
 
 // El formulario trabaja todo como texto y convierte al guardar.
 type Form = Record<keyof FacturaCampos, string>;
-type ItemForm = Record<keyof Omit<FacturaItem, "id">, string>;
+type ItemForm = Record<keyof Omit<FacturaItem, "id" | "insumo_id">, string> & { insumo_id?: number | null };
+type RepartoForm = { campo_id: string; lote_id: string; porcentaje: string };
 
 const CAMPOS_NUMERICOS_ENTEROS = ["proveedor_id", "tipo_comprobante", "punto_venta", "numero",
   "campania_id", "campo_id", "lote_id", "categoria_id"] as const;
@@ -28,9 +29,14 @@ function aForm(f: Factura): Form {
 const itemAForm = (i: FacturaItem): ItemForm => ({
   descripcion: i.descripcion, cantidad: i.cantidad ?? "", unidad: i.unidad ?? "",
   precio_unitario: i.precio_unitario ?? "", alicuota_iva: i.alicuota_iva ?? "", subtotal: i.subtotal ?? "",
+  insumo_id: i.insumo_id ?? null,
 });
 
-function aPayload(form: Form, items: ItemForm[]) {
+const repartoAForm = (i: Imputacion): RepartoForm => ({
+  campo_id: String(i.campo_id), lote_id: i.lote_id == null ? "" : String(i.lote_id), porcentaje: String(Number(i.porcentaje)),
+});
+
+function aPayload(form: Form, items: ItemForm[], reparto: RepartoForm[]) {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(form)) out[k] = nullSiVacio(v);
   for (const k of CAMPOS_NUMERICOS_ENTEROS) out[k] = numOrNull(form[k]);
@@ -38,7 +44,17 @@ function aPayload(form: Form, items: ItemForm[]) {
   out.cotizacion = form.cotizacion || "1";
   out.items = items
     .filter((i) => i.descripcion.trim())
-    .map((i) => Object.fromEntries(Object.entries(i).map(([k, v]) => [k, nullSiVacio(v)])));
+    .map(({ insumo_id, ...i }) => ({
+      ...Object.fromEntries(Object.entries(i).map(([k, v]) => [k, nullSiVacio(v)])),
+      insumo_id: insumo_id ?? null,
+    }));
+  out.imputaciones = reparto.map((r) => ({
+    campo_id: Number(r.campo_id), lote_id: numOrNull(r.lote_id), porcentaje: r.porcentaje,
+  }));
+  if (reparto.length) {
+    out.campo_id = null;
+    out.lote_id = null;
+  }
   return out;
 }
 
@@ -56,6 +72,7 @@ export default function FacturaDetalle() {
 
   const [form, setForm] = useState<Form | null>(null);
   const [items, setItems] = useState<ItemForm[]>([]);
+  const [reparto, setReparto] = useState<RepartoForm[]>([]);
   const [sucio, setSucio] = useState(false);
 
   // Cargar el formulario cuando llegan datos nuevos del servidor (salvo que haya cambios sin guardar)
@@ -63,6 +80,7 @@ export default function FacturaDetalle() {
     if (f && !sucio) {
       setForm(aForm(f));
       setItems(f.items.map(itemAForm));
+      setReparto(f.imputaciones.map(repartoAForm));
     }
   }, [f, sucio]);
 
@@ -75,12 +93,12 @@ export default function FacturaDetalle() {
   };
 
   const guardar = useMutation({
-    mutationFn: () => api<Factura>(`/facturas/${id}`, { method: "PATCH", json: aPayload(form!, items) }),
+    mutationFn: () => api<Factura>(`/facturas/${id}`, { method: "PATCH", json: aPayload(form!, items, reparto) }),
     onSuccess: refrescar,
   });
   const accion = useMutation({
     mutationFn: async (a: "confirmar" | "anular" | "reprocesar") => {
-      if (a === "confirmar" && sucio) await api(`/facturas/${id}`, { method: "PATCH", json: aPayload(form!, items) });
+      if (a === "confirmar" && sucio) await api(`/facturas/${id}`, { method: "PATCH", json: aPayload(form!, items, reparto) });
       return api<Factura>(`/facturas/${id}/${a}`, { method: "POST" });
     },
     onSuccess: refrescar,
@@ -149,7 +167,8 @@ export default function FacturaDetalle() {
       <div className={f.archivo_id ? "review" : ""}>
         {f.archivo_id && <VistaArchivo facturaId={f.id} />}
         {form && <FormularioFactura form={form} set={set} editable={editable} items={items}
-          setItems={(v) => { setItems(v); setSucio(true); }} />}
+          setItems={(v) => { setItems(v); setSucio(true); }}
+          reparto={reparto} setReparto={(v) => { setReparto(v); setSucio(true); }} />}
       </div>
     </div>
   );
@@ -177,13 +196,16 @@ function VistaArchivo({ facturaId }: { facturaId: number }) {
   );
 }
 
-function FormularioFactura({ form, set, editable, items, setItems }: {
+function FormularioFactura({ form, set, editable, items, setItems, reparto, setReparto }: {
   form: Form;
   set: (k: keyof Form) => (e: { target: { value: string } }) => void;
   editable: boolean;
   items: ItemForm[];
   setItems: (v: ItemForm[]) => void;
+  reparto: RepartoForm[];
+  setReparto: (v: RepartoForm[]) => void;
 }) {
+  const insumos = porId(useInsumos().data, (i) => i.nombre);
   const proveedores = useProveedores();
   const campos = useCampos();
   const campanias = useCampanias();
@@ -260,18 +282,26 @@ function FormularioFactura({ form, set, editable, items, setItems }: {
               {campanias.data?.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
             </select>
           </Field>
-          <Field label="Campo">
-            <select value={form.campo_id} onChange={set("campo_id")}>
-              <option value="">—</option>
-              {campos.data?.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-            </select>
-          </Field>
-          <Field label="Lote">
-            <select value={form.lote_id} onChange={set("lote_id")} disabled={dis || !lotes.length}>
-              <option value="">—</option>
-              {lotes.map((l) => <option key={l.id} value={l.id}>{l.nombre}</option>)}
-            </select>
-          </Field>
+          {reparto.length === 0 && (
+            <>
+              <Field label="Campo">
+                <select value={form.campo_id} onChange={set("campo_id")}>
+                  <option value="">—</option>
+                  {campos.data?.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+                </select>
+              </Field>
+              <Field label="Lote">
+                <select value={form.lote_id} onChange={set("lote_id")} disabled={dis || !lotes.length}>
+                  <option value="">—</option>
+                  {lotes.map((l) => <option key={l.id} value={l.id}>{l.nombre}</option>)}
+                </select>
+              </Field>
+            </>
+          )}
+          <div className="wide">
+            <EditorReparto reparto={reparto} setReparto={setReparto} editable={editable}
+              campoInicial={form.campo_id} loteInicial={form.lote_id} />
+          </div>
           <Field label="Observaciones" wide>
             <textarea rows={2} value={form.observaciones} onChange={set("observaciones")} />
           </Field>
@@ -283,12 +313,15 @@ function FormularioFactura({ form, set, editable, items, setItems }: {
         <div className="table-wrap">
           <table className="items-table">
             <thead>
-              <tr><th>Descripción</th><th>Cant.</th><th>Unidad</th><th>P. unit.</th><th>IVA %</th><th>Subtotal</th>{editable && <th />}</tr>
+              <tr><th>Descripción</th><th>Insumo</th><th>Cant.</th><th>Unidad</th><th>P. unit.</th><th>IVA %</th><th>Subtotal</th>{editable && <th />}</tr>
             </thead>
             <tbody>
               {items.map((it, i) => (
                 <tr key={i}>
                   <td style={{ minWidth: 180 }}><input value={it.descripcion} onChange={(e) => setItem(i, "descripcion", e.target.value)} /></td>
+                  <td className="muted" style={{ fontSize: 12, whiteSpace: "nowrap" }}>
+                    {it.insumo_id ? insumos.get(it.insumo_id) : "—"}
+                  </td>
                   <td><input type="number" step="any" value={it.cantidad} onChange={(e) => setItem(i, "cantidad", e.target.value)} /></td>
                   <td><input value={it.unidad} onChange={(e) => setItem(i, "unidad", e.target.value)} style={{ width: 60 }} /></td>
                   <td><input type="number" step="any" value={it.precio_unitario} onChange={(e) => setItem(i, "precio_unitario", e.target.value)} /></td>
@@ -311,5 +344,68 @@ function FormularioFactura({ form, set, editable, items, setItems }: {
         )}
       </div>
     </fieldset>
+  );
+}
+
+function EditorReparto({ reparto, setReparto, editable, campoInicial, loteInicial }: {
+  reparto: RepartoForm[];
+  setReparto: (v: RepartoForm[]) => void;
+  editable: boolean;
+  campoInicial: string;
+  loteInicial: string;
+}) {
+  const campos = useCampos();
+  const suma = reparto.reduce((s, r) => s + (Number(r.porcentaje) || 0), 0);
+  const set = (i: number, k: keyof RepartoForm, v: string) =>
+    setReparto(reparto.map((r, j) => (j === i ? { ...r, [k]: v, ...(k === "campo_id" ? { lote_id: "" } : {}) } : r)));
+
+  if (!reparto.length) {
+    return editable ? (
+      <button type="button" className="small" onClick={() => setReparto([
+        { campo_id: campoInicial, lote_id: loteInicial, porcentaje: "50" },
+        { campo_id: "", lote_id: "", porcentaje: "50" },
+      ])}>
+        Repartir entre varios campos o lotes
+      </button>
+    ) : null;
+  }
+
+  return (
+    <div className="stack" style={{ gap: 8 }}>
+      <div className="row" style={{ justifyContent: "space-between" }}>
+        <strong style={{ fontSize: 13 }}>Reparto del gasto</strong>
+        <span className={Math.abs(suma - 100) < 0.01 ? "badge good" : "badge critical"}>Suma {suma}%</span>
+      </div>
+      {reparto.map((r, i) => {
+        const lotes = campos.data?.find((c) => String(c.id) === r.campo_id)?.lotes ?? [];
+        return (
+          <div key={i} className="row">
+            <select aria-label="Campo" value={r.campo_id} onChange={(e) => set(i, "campo_id", e.target.value)} required>
+              <option value="">Campo…</option>
+              {campos.data?.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+            </select>
+            <select aria-label="Lote" value={r.lote_id} onChange={(e) => set(i, "lote_id", e.target.value)} disabled={!lotes.length}>
+              <option value="">Todo el campo</option>
+              {lotes.map((l) => <option key={l.id} value={l.id}>{l.nombre}</option>)}
+            </select>
+            <input aria-label="Porcentaje" type="number" min="0" max="100" step="any" style={{ width: 80 }}
+              value={r.porcentaje} onChange={(e) => set(i, "porcentaje", e.target.value)} /> %
+            {editable && (
+              <button type="button" className="small" aria-label="Quitar"
+                onClick={() => setReparto(reparto.filter((_, j) => j !== i))}>✕</button>
+            )}
+          </div>
+        );
+      })}
+      {editable && (
+        <div className="row">
+          <button type="button" className="small"
+            onClick={() => setReparto([...reparto, { campo_id: "", lote_id: "", porcentaje: String(Math.max(0, 100 - suma)) }])}>
+            + Agregar
+          </button>
+          <button type="button" className="small" onClick={() => setReparto([])}>Quitar reparto</button>
+        </div>
+      )}
+    </div>
   );
 }

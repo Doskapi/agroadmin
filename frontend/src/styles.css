@@ -185,3 +185,22 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .spinner { width: 14px; height: 14px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite; display: inline-block; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* --- catálogo de facturas --- */
+.buscador { flex: 1 1 320px; align-self: end; }
+th.sortable button { all: unset; cursor: pointer; font: inherit; color: inherit; text-transform: inherit; letter-spacing: inherit; }
+th.sortable button:hover { color: var(--text); }
+th.sortable button:focus-visible { outline: 2px solid var(--series-1); }
+td.imputacion { font-size: 13px; color: var(--text-2); max-width: 280px; }
+.pie-tabla { justify-content: space-between; margin-top: 10px; font-size: 13px; }
+.barra-seleccion { background: var(--info-bg); color: var(--info-text); padding: 8px 12px; border-radius: 6px; }
+.alert.good { background: var(--good-bg); color: var(--good-text); }
+.alert.info { background: var(--info-bg); color: var(--info-text); }
+td.clickable-cell { cursor: pointer; }
+td.clickable-cell:hover { background: var(--surface-2); text-decoration: underline; }
+.pivot td, .pivot th { white-space: nowrap; }
+.pivot th:first-child, .pivot td:first-child { position: sticky; left: 0; background: var(--surface); z-index: 1; }
+tr.subfila td:first-child { padding-left: 28px; color: var(--text-2); }
+.segmented { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.segmented button { border: none; border-radius: 0; padding: 6px 12px; }
+.segmented button.active { background: var(--accent); color: var(--accent-text); }

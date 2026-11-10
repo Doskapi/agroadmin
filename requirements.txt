@@ -14,7 +14,7 @@ opencv-python-headless==4.11.0.86
 zxing-cpp==3.1.1
 numpy>=2.0
 openpyxl==3.1.5
+httpx==0.28.1
 
 # tests
 pytest==8.3.5
-httpx==0.28.1

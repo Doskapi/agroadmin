@@ -19,6 +19,24 @@ docker compose up -d --build
 
 Al arrancar, el contenedor aplica las migraciones y crea permisos, roles, categorías y el usuario admin del `.env`.
 
+## Catálogo de facturas y reportes
+
+- **Catálogo** (`GET /facturas/catalogo`): búsqueda libre (proveedor, CUIT, número, CAE, ítems, observaciones),
+  filtros por estado, proveedor, rubro, campaña, campo, lote, tipo, moneda, rango de montos y "sin imputar",
+  orden por columna y paginado. Devuelve la cantidad y la suma en pesos de todo lo filtrado.
+  `GET /facturas/catalogo.xlsx` exporta el detalle (hoja de comprobantes, que sirve de libro IVA compras, y hoja de ítems).
+- **Acciones masivas** (`POST /facturas/acciones`): imputar rubro/campaña/campo/lote o confirmar varias facturas a la vez.
+- **Reparto**: una factura se puede repartir entre varios campos/lotes por porcentaje (`imputaciones` en el
+  `PATCH`). Todos los reportes por campo o lote respetan el reparto.
+- **Rubro por defecto del proveedor**: las facturas nuevas de ese proveedor llegan con ese rubro.
+- **Reportes**: gastos por mes/rubro/proveedor/campo/lote/campaña, tabla de doble entrada (`/reportes/cruce`,
+  ej. rubro × campaña para comparar campañas), costo por hectárea, IVA compras por mes e insumos (precio
+  promedio, último precio e historial). Cada fila lleva al catálogo filtrado.
+- **Dólares**: `expresado_en=USD` pasa los reportes a dólares con la cotización del BCRA del día de cada factura.
+  Las cotizaciones se traen con `POST /cotizaciones/actualizar` (botón en Catálogos → Cotización del dólar).
+- **Insumos**: en Catálogos → Insumos se asignan las descripciones de ítems a insumos normalizados; las
+  descripciones iguales (sin importar mayúsculas, tildes o puntuación) se asignan solas, también en facturas futuras.
+
 ## Seguridad
 
 - **Claves obligatorias.** Con `ENTORNO=produccion` (el valor por defecto) la API no arranca si `SECRET_KEY`
