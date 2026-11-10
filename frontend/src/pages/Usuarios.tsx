@@ -21,13 +21,14 @@ export default function Usuarios() {
       <ErrorMsg error={usuarios.error} />
       <div className="card flush table-wrap">
         <table>
-          <thead><tr><th>Nombre</th><th>Email</th><th>Roles</th><th>Estado</th></tr></thead>
+          <thead><tr><th>Nombre</th><th>Email</th><th>Roles</th><th>Dos pasos</th><th>Estado</th></tr></thead>
           <tbody>
             {usuarios.data?.map((u) => (
               <tr key={u.id} className="clickable" onClick={() => setEditando(u)}>
                 <td>{u.nombre}{u.id === yo?.id && <span className="muted"> (vos)</span>}</td>
                 <td>{u.email}</td>
                 <td>{u.roles.join(", ") || <span className="muted">sin rol</span>}</td>
+                <td>{u.totp_activo ? <span className="badge good">✓ Activa</span> : <span className="muted">—</span>}</td>
                 <td>{u.activo ? <span className="badge good">✓ Activo</span> : <span className="badge muted">– Inactivo</span>}</td>
               </tr>
             ))}
@@ -75,12 +76,16 @@ function FormUsuario({ u, roles, esYo, onClose }: { u: Usuario | null; roles: Ro
       onClose();
     },
   });
+  const reiniciar2fa = useMutation({
+    mutationFn: () => api(`/usuarios/${u!.id}/2fa/reiniciar`, { method: "POST" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["usuarios"] }),
+  });
   const toggle = (r: string) => setSel((s) => (s.includes(r) ? s.filter((x) => x !== r) : [...s, r]));
 
   return (
     <Modal titulo={u ? `Editar ${u.nombre}` : "Nuevo usuario"} onClose={onClose}>
       <form onSubmit={(e) => { e.preventDefault(); guardar.mutate(); }}>
-        <ErrorMsg error={guardar.error} />
+        <ErrorMsg error={guardar.error ?? reiniciar2fa.error} />
         <div className="form-grid" style={{ marginTop: 8 }}>
           <Field label="Nombre"><input required value={f.nombre} onChange={(e) => setF({ ...f, nombre: e.target.value })} /></Field>
           <Field label="Email"><input type="email" required disabled={!!u} value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></Field>
@@ -104,6 +109,15 @@ function FormUsuario({ u, roles, esYo, onClose }: { u: Usuario | null; roles: Ro
             <input type="checkbox" checked={f.activo} onChange={(e) => setF({ ...f, activo: e.target.checked })} />
             Usuario activo (desmarcar para bloquear el acceso)
           </label>
+        )}
+        {u?.totp_activo && !esYo && (
+          <div className="row" style={{ marginTop: 16 }}>
+            <button type="button" className="small" disabled={reiniciar2fa.isPending || reiniciar2fa.isSuccess}
+              onClick={() => confirm(`¿Reiniciar la verificación en dos pasos de ${u.nombre}? Se le cierran las sesiones y la vuelve a configurar al entrar.`) && reiniciar2fa.mutate()}>
+              {reiniciar2fa.isSuccess ? "Verificación reiniciada" : "Reiniciar verificación en dos pasos"}
+            </button>
+            <span className="muted" style={{ fontSize: 12 }}>Para cuando perdió o cambió el celular.</span>
+          </div>
         )}
         <div className="modal-actions">
           <button type="button" onClick={onClose}>Cancelar</button>

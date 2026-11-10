@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from app import insumos, storage, validar_archivo
+from app.auditoria import auditar, diferencias
 from app.deps import DB, UsuarioActual, requiere
 from app.extraccion import pipeline
 from app.filtros import NOTAS_CREDITO, FiltrosFactura, aplicar, filtros_query, monto_pesos
@@ -29,6 +30,7 @@ from app.models import (
 )
 from app.schemas import (
     AccionMasiva,
+    AnularIn,
     CatalogoFacturas,
     FacturaIn,
     FacturaOut,
@@ -246,6 +248,8 @@ def accion_masiva(db: DB, data: AccionMasiva, usuario: UsuarioActual):
             if factura.estado in NO_EDITABLES or factura.estado == EstadoFactura.procesando:
                 errores[fid] = f"Está {factura.estado.value}"
                 continue
+            if dif := diferencias(factura, cambios):
+                auditar(db, usuario.id, "factura_editada", "factura", fid, cambios=dif, masiva=True)
             for k, v in cambios.items():
                 setattr(factura, k, v)
             if "campo_id" in cambios:
@@ -255,6 +259,7 @@ def accion_masiva(db: DB, data: AccionMasiva, usuario: UsuarioActual):
                 errores[fid] = motivo
                 continue
             factura.estado = EstadoFactura.confirmada
+            auditar(db, usuario.id, "factura_confirmada", "factura", fid, masiva=True)
         ok.append(fid)
     db.commit()
     return ResultadoAccionMasiva(ok=ok, errores=errores)
@@ -276,6 +281,8 @@ def crear_manual(db: DB, data: FacturaIn, usuario: Usuario = requiere("facturas:
     factura.imputaciones = _imputaciones(db, data.imputaciones)
     _categoria_del_proveedor(db, factura)
     db.add(factura)
+    db.flush()
+    auditar(db, usuario.id, "factura_creada", "factura", factura.id, origen="manual")
     _commit(db, factura)
     return factura
 
@@ -305,33 +312,46 @@ async def importar(
 
     factura = Factura(estado=EstadoFactura.procesando, archivo_id=existente.id, creado_por_id=usuario.id)
     db.add(factura)
+    db.flush()
+    auditar(db, usuario.id, "factura_creada", "factura", factura.id, origen="importacion",
+            archivo=existente.nombre_original)
     db.commit()
     background.add_task(pipeline.procesar_en_segundo_plano, factura.id)
     return factura
 
 
-@router.post("/{factura_id}/reprocesar", response_model=FacturaOut, status_code=202,
-             dependencies=[requiere("facturas:escribir")])
-def reprocesar(db: DB, factura_id: int, background: BackgroundTasks):
+@router.post("/{factura_id}/reprocesar", response_model=FacturaOut, status_code=202)
+def reprocesar(db: DB, factura_id: int, background: BackgroundTasks, usuario: Usuario = requiere("facturas:escribir")):
     factura = _obtener(db, factura_id)
     if not factura.archivo_id:
         raise HTTPException(422, "La factura no tiene archivo asociado")
     if factura.estado == EstadoFactura.confirmada:
         raise HTTPException(409, "No se puede reprocesar una factura confirmada")
     factura.estado = EstadoFactura.procesando
+    auditar(db, usuario.id, "factura_reprocesada", "factura", factura.id)
     db.commit()
     background.add_task(pipeline.procesar_en_segundo_plano, factura.id)
     return factura
 
 
-@router.patch("/{factura_id}", response_model=FacturaOut, dependencies=[requiere("facturas:escribir")])
-def editar(db: DB, factura_id: int, data: FacturaUpdate):
+@router.patch("/{factura_id}", response_model=FacturaOut)
+def editar(db: DB, factura_id: int, data: FacturaUpdate, usuario: Usuario = requiere("facturas:escribir")):
     factura = _obtener(db, factura_id)
     if factura.estado in NO_EDITABLES:
         raise HTTPException(409, f"La factura está {factura.estado.value} y no se puede editar")
     cambios = data.model_dump(exclude_unset=True)
     items = cambios.pop("items", None)
     imputaciones = cambios.pop("imputaciones", None)
+    dif = diferencias(factura, cambios)
+    if items is not None and len(items) != len(factura.items):
+        dif["items"] = [len(factura.items), len(items)]
+    if imputaciones is not None:
+        antes = [[i.campo_id, i.lote_id, str(i.porcentaje.normalize())] for i in factura.imputaciones]
+        despues = [[i.campo_id, i.lote_id, str(i.porcentaje.normalize())] for i in data.imputaciones]
+        if antes != despues:
+            dif["reparto"] = [antes, despues]
+    if dif:
+        auditar(db, usuario.id, "factura_editada", "factura", factura.id, cambios=dif)
     for k, v in cambios.items():
         setattr(factura, k, v)
     if items is not None:
@@ -355,19 +375,25 @@ def _no_confirmable(factura: Factura) -> str | None:
     return None
 
 
-@router.post("/{factura_id}/confirmar", response_model=FacturaOut, dependencies=[requiere("facturas:confirmar")])
-def confirmar(db: DB, factura_id: int):
+@router.post("/{factura_id}/confirmar", response_model=FacturaOut)
+def confirmar(db: DB, factura_id: int, usuario: Usuario = requiere("facturas:confirmar")):
     factura = _obtener(db, factura_id)
     if motivo := _no_confirmable(factura):
         raise HTTPException(409 if factura.estado != EstadoFactura.pendiente_revision else 422, motivo)
     factura.estado = EstadoFactura.confirmada
+    auditar(db, usuario.id, "factura_confirmada", "factura", factura.id)
     db.commit()
     return factura
 
 
-@router.post("/{factura_id}/anular", response_model=FacturaOut, dependencies=[requiere("facturas:confirmar")])
-def anular(db: DB, factura_id: int):
+@router.post("/{factura_id}/anular", response_model=FacturaOut)
+def anular(db: DB, factura_id: int, data: AnularIn, usuario: Usuario = requiere("facturas:confirmar")):
+    """Anula la factura (deja de contar en los reportes). El motivo queda en la auditoría."""
     factura = _obtener(db, factura_id)
+    if factura.estado == EstadoFactura.anulada:
+        raise HTTPException(409, "La factura ya está anulada")
+    auditar(db, usuario.id, "factura_anulada", "factura", factura.id, motivo=data.motivo,
+            estado_anterior=factura.estado)
     factura.estado = EstadoFactura.anulada
     db.commit()
     return factura

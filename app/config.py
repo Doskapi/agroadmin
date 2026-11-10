@@ -21,7 +21,27 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+psycopg://agro:agro@localhost:5432/agro"
     secret_key: str = "dev-inseguro-cambiar"
+    # Sesiones: se cierran tras este tiempo sin uso, y como máximo duran sesion_maxima_horas.
     access_token_minutes: int = 480
+    sesion_maxima_horas: int = 7 * 24
+    # Cookie de sesión solo por HTTPS. "auto": según el protocolo con el que llegó el pedido.
+    cookie_segura: Literal["auto", "si", "no"] = "auto"
+
+    # Verificación en dos pasos obligatoria para quienes tengan alguno de estos permisos (separados por coma).
+    exigir_2fa: str = "usuarios:admin,facturas:confirmar"
+
+    # Correo saliente (recuperación de contraseña y avisos). Sin SMTP_HOST no se envían correos.
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_usuario: str | None = None
+    smtp_password: str | None = None
+    smtp_remitente: str = "Gestión Agro <no-responder@localhost>"
+    smtp_tls: bool = True
+    # URL con la que los usuarios abren la app (para los links de los correos)
+    url_publica: str = "http://localhost:8080"
+
+    # Usuario de solo lectura para Metabase u otras herramientas de BI (se crea si hay contraseña)
+    lector_db_password: str | None = None
 
     admin_email: str = "admin@example.com"
     admin_password: str = "admin"
@@ -44,6 +64,10 @@ class Settings(BaseSettings):
     @property
     def es_produccion(self) -> bool:
         return self.entorno == "produccion"
+
+    @property
+    def permisos_con_2fa(self) -> set[str]:
+        return {p.strip() for p in self.exigir_2fa.split(",") if p.strip()}
 
     @model_validator(mode="after")
     def _exigir_secret_key(self):

@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { NavLink, Outlet } from "react-router-dom";
+import { Link, NavLink, Outlet } from "react-router-dom";
 import { api } from "../api";
 import { useAuth } from "../auth";
 import type { Permiso, Resumen } from "../types";
@@ -11,6 +11,7 @@ const LINKS: { to: string; texto: string; permiso: Permiso }[] = [
   { to: "/reportes", texto: "Reportes", permiso: "reportes:ver" },
   { to: "/catalogos", texto: "Catálogos", permiso: "catalogos:leer" },
   { to: "/usuarios", texto: "Usuarios", permiso: "usuarios:admin" },
+  { to: "/auditoria", texto: "Auditoría", permiso: "auditoria:ver" },
 ];
 
 export default function Layout() {
@@ -40,7 +41,10 @@ export default function Layout() {
         <div className="sidebar-footer">
           <div style={{ fontWeight: 600 }}>{usuario?.nombre}</div>
           <div className="muted" style={{ marginBottom: 8 }}>{usuario?.roles.join(", ")}</div>
-          <button className="small" onClick={logout}>Salir</button>
+          <div className="row">
+            <Link to="/cuenta" className="btn small">Mi cuenta</Link>
+            <button className="small" onClick={logout}>Salir</button>
+          </div>
         </div>
       </aside>
       <main className="main">

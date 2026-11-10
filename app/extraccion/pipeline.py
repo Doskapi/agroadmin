@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app import insumos, storage
+from app.auditoria import auditar
 from app.db import SessionLocal
 from app.extraccion import ia, pdf, qr_arca
 from app.models import Archivo, Categoria, EstadoFactura, Factura, FacturaItem, Proveedor
@@ -160,6 +161,8 @@ def procesar(db: Session, factura: Factura) -> None:
 
     extraido["advertencias"] = advertencias
     factura.datos_extraidos = extraido
+    auditar(db, None, "factura_procesada", "factura", factura.id, fuentes=extraido["fuentes"],
+            advertencias=advertencias)
 
     if not extraido["fuentes"]:
         factura.estado = EstadoFactura.error

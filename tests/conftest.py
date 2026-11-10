@@ -10,7 +10,9 @@ os.environ["ANTHROPIC_API_KEY"] = ""
 os.environ["ADMIN_EMAIL"] = "admin@test.com"
 os.environ["ADMIN_PASSWORD"] = "admin-test-1234"
 os.environ["SECRET_KEY"] = "clave-de-tests-" + "x" * 32
-os.environ["ENTORNO"] = "produccion"  # los tests corren con las mismas validaciones que producción
+os.environ["ENTORNO"] = "produccion"
+os.environ["EXIGIR_2FA"] = ""  # los tests de 2FA obligatoria lo activan con monkeypatch
+os.environ["SMTP_HOST"] = ""  # los tests corren con las mismas validaciones que producción
 
 import pytest  # noqa: E402
 from alembic import command  # noqa: E402
@@ -24,7 +26,7 @@ from app.main import app  # noqa: E402
 from app.seed import seed  # noqa: E402
 
 TABLAS_DATOS = ("factura_imputaciones, factura_items, facturas, archivos, insumo_alias, insumos, cotizaciones, "
-                "proveedores, cartas_porte, lotes, campos, campanias")
+                "proveedores, cartas_porte, lotes, campos, campanias, auditoria, sesiones, tokens_recuperacion")
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -48,6 +50,7 @@ def limpiar():
     with engine.begin() as c:
         c.execute(text(f"TRUNCATE {TABLAS_DATOS} RESTART IDENTITY CASCADE"))
         c.execute(text("DELETE FROM usuarios WHERE email <> 'admin@test.com'"))
+        c.execute(text("UPDATE usuarios SET totp_activo = false, totp_secreto = NULL, totp_ultimo_paso = NULL"))
 
 
 @pytest.fixture

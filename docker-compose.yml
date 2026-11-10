@@ -101,8 +101,9 @@ services:
 
   # Dashboards sin programar, conectados directo a Postgres: http://localhost:3000
   # Solo accesible desde esta máquina; para usarlo desde otra, ponerlo detrás de Caddy.
+  # Conectarlo con el usuario de solo lectura `lector` (ver LECTOR_DB_PASSWORD en el .env).
   metabase:
-    image: metabase/metabase:latest
+    image: metabase/metabase:v0.57.5
     ports:
       - "127.0.0.1:3000:3000"
     depends_on:

@@ -1,15 +1,18 @@
 import type { ReactNode } from "react";
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { useAuth } from "./auth";
-import { Cargando } from "./components/ui";
+import { Cargando, ErrorMsg } from "./components/ui";
 import Layout from "./components/Layout";
+import Auditoria from "./pages/Auditoria";
 import CartasPorte from "./pages/CartasPorte";
 import Catalogos from "./pages/Catalogos";
+import Cuenta, { Activar2FA } from "./pages/Cuenta";
 import Dashboard from "./pages/Dashboard";
 import FacturaDetalle from "./pages/FacturaDetalle";
 import Facturas from "./pages/Facturas";
 import Login from "./pages/Login";
 import Reportes from "./pages/Reportes";
+import Restablecer from "./pages/Restablecer";
 import Usuarios from "./pages/Usuarios";
 import type { Permiso } from "./types";
 
@@ -27,10 +30,38 @@ function Inicio() {
   return <div className="empty">Tu usuario no tiene secciones asignadas.</div>;
 }
 
+/** El rol del usuario exige verificación en dos pasos y todavía no la configuró: no puede hacer otra cosa. */
+function Exigir2FA() {
+  const { logout } = useAuth();
+  return (
+    <div className="login">
+      <div className="card stack" style={{ maxWidth: 440 }}>
+        <h1>Activá la verificación en dos pasos</h1>
+        <div className="muted">Tu rol tiene acceso a datos sensibles, así que para seguir hace falta configurarla.</div>
+        <Activar2FA />
+        <button className="link" onClick={logout}>Salir</button>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
-  const { usuario, cargando } = useAuth();
+  const { usuario, cargando, error, reintentar } = useAuth();
+  const { pathname } = useLocation();
+  if (pathname === "/restablecer") return <Restablecer />;
   if (cargando) return <Cargando />;
+  if (error) {
+    return (
+      <div className="login">
+        <div className="card stack">
+          <ErrorMsg error={error} />
+          <button className="primary" onClick={reintentar}>Reintentar</button>
+        </div>
+      </div>
+    );
+  }
   if (!usuario) return <Login />;
+  if (usuario.debe_activar_2fa) return <Exigir2FA />;
 
   return (
     <Routes>
@@ -42,6 +73,8 @@ export default function App() {
         <Route path="reportes" element={<Requiere permiso="reportes:ver"><Reportes /></Requiere>} />
         <Route path="catalogos" element={<Requiere permiso="catalogos:leer"><Catalogos /></Requiere>} />
         <Route path="usuarios" element={<Requiere permiso="usuarios:admin"><Usuarios /></Requiere>} />
+        <Route path="auditoria" element={<Requiere permiso="auditoria:ver"><Auditoria /></Requiere>} />
+        <Route path="cuenta" element={<Cuenta />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

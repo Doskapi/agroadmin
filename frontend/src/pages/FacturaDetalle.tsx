@@ -3,10 +3,11 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api, apiBlob } from "../api";
 import { useAuth } from "../auth";
-import { BadgeFactura, Cargando, ErrorMsg, Field, nullSiVacio, numOrNull } from "../components/ui";
+import { ACCIONES, DetalleAuditoria, fechaHora } from "../components/Auditoria";
+import { BadgeFactura, Cargando, ErrorMsg, Field, Modal, nullSiVacio, numOrNull } from "../components/ui";
 import { comprobante, fecha, pesos, TIPOS_COMPROBANTE } from "../format";
 import { porId, useCampanias, useCampos, useCategorias, useInsumos, useProveedores } from "../hooks";
-import type { Factura, FacturaCampos, FacturaItem, Imputacion } from "../types";
+import type { EntradaAuditoria, Factura, FacturaCampos, FacturaItem, Imputacion } from "../types";
 
 // El formulario trabaja todo como texto y convierte al guardar.
 type Form = Record<keyof FacturaCampos, string>;
@@ -97,12 +98,17 @@ export default function FacturaDetalle() {
     onSuccess: refrescar,
   });
   const accion = useMutation({
-    mutationFn: async (a: "confirmar" | "anular" | "reprocesar") => {
+    mutationFn: async ({ a, motivo }: { a: "confirmar" | "anular" | "reprocesar"; motivo?: string }) => {
       if (a === "confirmar" && sucio) await api(`/facturas/${id}`, { method: "PATCH", json: aPayload(form!, items, reparto) });
-      return api<Factura>(`/facturas/${id}/${a}`, { method: "POST" });
+      return api<Factura>(`/facturas/${id}/${a}`, { method: "POST", ...(a === "anular" ? { json: { motivo } } : {}) });
     },
-    onSuccess: refrescar,
+    onSuccess: (data) => {
+      refrescar(data);
+      setAnulando(false);
+      qc.invalidateQueries({ queryKey: ["historial", id] });
+    },
   });
+  const [anulando, setAnulando] = useState(false);
 
   if (factura.isPending) return <Cargando />;
   if (factura.error || !f) return <ErrorMsg error={factura.error} />;
@@ -131,7 +137,7 @@ export default function FacturaDetalle() {
         </div>
         <div className="row">
           {f.archivo_id && puede("facturas:escribir") && f.estado !== "confirmada" && f.estado !== "procesando" && (
-            <button onClick={() => accion.mutate("reprocesar")} disabled={accion.isPending}>Volver a leer</button>
+            <button onClick={() => accion.mutate({ a: "reprocesar" })} disabled={accion.isPending}>Volver a leer</button>
           )}
           {editable && (
             <button onClick={() => guardar.mutate()} disabled={!sucio || guardar.isPending}>
@@ -139,13 +145,12 @@ export default function FacturaDetalle() {
             </button>
           )}
           {puede("facturas:confirmar") && f.estado === "pendiente_revision" && (
-            <button className="primary" onClick={() => accion.mutate("confirmar")} disabled={accion.isPending}>
+            <button className="primary" onClick={() => accion.mutate({ a: "confirmar" })} disabled={accion.isPending}>
               ✓ Confirmar
             </button>
           )}
           {puede("facturas:confirmar") && f.estado !== "anulada" && f.estado !== "procesando" && (
-            <button className="danger" disabled={accion.isPending}
-              onClick={() => confirm("¿Anular esta factura? Deja de contar en los reportes.") && accion.mutate("anular")}>
+            <button className="danger" disabled={accion.isPending} onClick={() => setAnulando(true)}>
               Anular
             </button>
           )}
@@ -164,12 +169,16 @@ export default function FacturaDetalle() {
         </div>
       )}
 
+      {anulando && <ModalAnular pending={accion.isPending} error={accion.error} onClose={() => setAnulando(false)}
+        onAnular={(motivo) => accion.mutate({ a: "anular", motivo })} />}
+
       <div className={f.archivo_id ? "review" : ""}>
         {f.archivo_id && <VistaArchivo facturaId={f.id} />}
         {form && <FormularioFactura form={form} set={set} editable={editable} items={items}
           setItems={(v) => { setItems(v); setSucio(true); }}
           reparto={reparto} setReparto={(v) => { setReparto(v); setSucio(true); }} />}
       </div>
+      <Historial facturaId={f.id} />
     </div>
   );
 }
@@ -406,6 +415,56 @@ function EditorReparto({ reparto, setReparto, editable, campoInicial, loteInicia
           <button type="button" className="small" onClick={() => setReparto([])}>Quitar reparto</button>
         </div>
       )}
+    </div>
+  );
+}
+
+function ModalAnular({ onClose, onAnular, pending, error }: {
+  onClose: () => void; onAnular: (motivo: string) => void; pending: boolean; error: unknown;
+}) {
+  const [motivo, setMotivo] = useState("");
+  return (
+    <Modal titulo="Anular factura" onClose={onClose}>
+      <form onSubmit={(e) => { e.preventDefault(); onAnular(motivo); }} className="stack">
+        <div className="muted">Deja de contar en los reportes. El motivo queda registrado en el historial.</div>
+        <ErrorMsg error={error} />
+        <Field label="Motivo">
+          <textarea rows={2} required minLength={3} value={motivo} onChange={(e) => setMotivo(e.target.value)} autoFocus
+            placeholder="Ej.: duplicada, cargada por error, el proveedor la anuló" />
+        </Field>
+        <div className="modal-actions">
+          <button type="button" onClick={onClose}>Cancelar</button>
+          <button className="danger" disabled={pending}>Anular</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function Historial({ facturaId }: { facturaId: number }) {
+  const [abierto, setAbierto] = useState(false);
+  const hist = useQuery({
+    queryKey: ["historial", String(facturaId)],
+    queryFn: () => api<EntradaAuditoria[]>(`/facturas/${facturaId}/historial`),
+    enabled: abierto,
+  });
+  return (
+    <div className="card">
+      <button type="button" className="link" style={{ fontWeight: 600 }} onClick={() => setAbierto(!abierto)} aria-expanded={abierto}>
+        {abierto ? "▾" : "▸"} Historial de cambios
+      </button>
+      {abierto && (hist.isPending ? <Cargando /> : (
+        <ul className="historial">
+          {hist.data?.map((e) => (
+            <li key={e.id}>
+              <span className="muted">{fechaHora(e.fecha)}</span> · <strong>{e.usuario ?? "Sistema"}</strong>{" "}
+              {(ACCIONES[e.accion] ?? e.accion).toLowerCase()}
+              <div><DetalleAuditoria e={e} /></div>
+            </li>
+          ))}
+          {!hist.data?.length && <li className="muted">Sin registros (la factura es anterior a la auditoría).</li>}
+        </ul>
+      ))}
     </div>
   );
 }
