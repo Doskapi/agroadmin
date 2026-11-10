@@ -10,7 +10,7 @@ from app import correo
 from app.config import settings
 from app.db import engine
 from tests.conftest import login
-from tests.helpers import pdf_con_qr, url_qr
+from tests.helpers import importar, pdf_con_qr, url_qr
 
 ADMIN = ("admin@test.com", "admin-test-1234")
 
@@ -192,8 +192,7 @@ def test_admin_reinicia_2fa(client, admin):
 
 
 def test_auditoria_de_factura(client, admin):
-    fid = client.post("/facturas/importar", headers=admin,
-                      files={"archivo": ("f.pdf", pdf_con_qr(url_qr()), "application/pdf")}).json()["id"]
+    fid = importar(client, admin, pdf_con_qr(url_qr())).json()["id"]
     client.patch(f"/facturas/{fid}", headers=admin, json={"observaciones": "revisada", "total": 121000.5})
     assert client.post(f"/facturas/{fid}/anular", headers=admin, json={}).status_code == 422  # falta el motivo
     assert client.post(f"/facturas/{fid}/anular", headers=admin, json={"motivo": "duplicada en papel"}).status_code == 200

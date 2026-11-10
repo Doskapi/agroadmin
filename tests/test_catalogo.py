@@ -226,8 +226,9 @@ def test_reporte_en_dolares(client, admin, datos):
 
 
 def test_actualizar_cotizaciones_bcra(client, admin, monkeypatch):
-    from app.routers import cotizaciones
     from decimal import Decimal
+
+    from app.routers import cotizaciones
 
     pedidos = []
 

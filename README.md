@@ -18,6 +18,8 @@ docker compose up -d --build
   (solo desde esta máquina; en Metabase, conectar a Postgres con host `db`, base `agro`, usuario `agro`)
 
 Al arrancar, el contenedor aplica las migraciones y crea permisos, roles, categorías y el usuario admin del `.env`.
+El servicio `worker` lee las facturas importadas (cola de trabajos en Postgres) y corre tareas periódicas.
+`GET /api/salud` informa si la base y el worker están funcionando.
 
 ## Catálogo de facturas y reportes
 
@@ -91,7 +93,8 @@ docker compose run --rm --entrypoint sh -v agroadmin_archivos:/data/archivos bac
 ## Cómo se carga una factura
 
 1. `POST /facturas/importar` con el PDF o la foto → responde enseguida con estado `procesando`.
-2. En segundo plano:
+2. El `worker` la toma de la cola (si se reinicia, la retoma; si la API de Claude falla por algo pasajero,
+   reintenta con espera creciente):
    - **QR de ARCA**: se busca en los links del PDF, en el texto y en la imagen. De ahí salen CUIT, tipo,
      punto de venta, número, fecha, total, moneda y CAE (son datos oficiales y tienen prioridad).
    - **Claude** (si hay `ANTHROPIC_API_KEY`): lee el comprobante completo y aporta razón social, neto, IVA,
@@ -126,6 +129,19 @@ Los roles se editan con `PUT /roles/{nombre}` (lista de permisos en `GET /permis
 | `GET /reportes/gastos.xlsx?...` | El mismo reporte en Excel |
 | `GET /reportes/resumen` | Datos del dashboard |
 
+## Operación
+
+- **Logs:** `LOG_FORMATO=json` emite una línea JSON por evento (pedidos con método, ruta, estado, duración,
+  usuario e id de pedido, que también vuelve en el header `X-Request-ID`). `SENTRY_DSN` manda los errores a Sentry.
+- **Cola de trabajos:** tabla `trabajos` (estado, intentos, último error). Un trabajo que falla 5 veces queda en
+  `error` y la factura se marca con error para reprocesarla a mano.
+- **Modelo de extracción:** `CLAUDE_MODEL` y `CLAUDE_EFFORT` (por defecto `claude-opus-5-5`, `medium`). Para ver si
+  un modelo más barato alcanza, comparalos sobre facturas ya confirmadas (cada factura es una llamada paga por modelo):
+
+  ```bash
+  docker compose exec worker python -m app.extraccion.evaluar --modelos claude-opus-5-5 claude-sonnet-5-5 claude-haiku-5-5 --limite 20
+  ```
+
 ## Desarrollo
 
 ```bash
@@ -134,12 +150,19 @@ Los roles se editan con `PUT /roles/{nombre}` (lista de permisos en `GET /permis
 # tests (usan una base agro_test aparte, con las migraciones reales)
 docker compose run --rm -v "$PWD:/app" api python -m pytest -q
 
+# tests del frontend
+docker run --rm -v "$PWD/frontend:/w" -w /w node:22-alpine sh -c "npm ci && npm test"
+
 # nueva migración después de cambiar app/models.py
 docker compose run --rm -v "$PWD:/app" api alembic revision --autogenerate -m "descripcion"
 
 # frontend con recarga en caliente (no hace falta tener Node instalado): http://localhost:5173
 docker compose --profile dev up web-dev
 ```
+
+La CI de GitHub (`.github/workflows/ci.yml`) corre en cada PR: ruff, pip-audit, chequeo de migraciones y tests
+del backend contra Postgres; npm audit, tests (Vitest) y build del frontend; y build de las imágenes. Dependabot
+avisa de versiones nuevas.
 
 El frontend (`frontend/`) es React + TypeScript + Vite, con TanStack Query para los datos y Recharts para
 los gráficos. En producción lo sirve nginx (`web`), que también redirige `/api/*` al backend. Las pantallas
@@ -161,6 +184,7 @@ app/
   extraccion/        QR de ARCA, PDF, Claude y el pipeline que los combina
 alembic/             migraciones
 scripts/backup.sh    copias diarias (servicio `backup`)
+app/worker.py        worker: cola de trabajos y tareas periódicas
 Caddyfile            HTTPS (perfil `https`)
 tests/
 frontend/

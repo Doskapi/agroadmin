@@ -1,9 +1,8 @@
 """Validación de archivos subidos: tamaño, tipo real (por contenido, no por lo que dice el navegador)
 y PDFs que se puedan procesar."""
 
-from fastapi import HTTPException, UploadFile, status
-
 import pymupdf
+from fastapi import HTTPException, UploadFile, status
 
 from app.config import settings
 
@@ -56,5 +55,5 @@ def validar_factura(data: bytes) -> str:
         except HTTPException:
             raise
         except Exception:
-            raise HTTPException(422, "El PDF está dañado o no se puede leer")
+            raise HTTPException(422, "El PDF está dañado o no se puede leer") from None
     return tipo

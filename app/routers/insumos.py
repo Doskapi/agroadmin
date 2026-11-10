@@ -23,7 +23,7 @@ def _guardar(db: DB, obj: Insumo) -> Insumo:
         db.commit()
     except IntegrityError:
         db.rollback()
-        raise HTTPException(409, "Ya existe un insumo con ese nombre")
+        raise HTTPException(409, "Ya existe un insumo con ese nombre") from None
     db.refresh(obj)
     return obj
 

@@ -27,6 +27,29 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/salud', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      start_period: 40s
+      retries: 3
+    restart: unless-stopped
+    networks: [interna]
+
+  # Lee las facturas importadas (cola de trabajos) y corre tareas periódicas
+  worker:
+    build: .
+    command: ["python", "-m", "app.worker"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://agro:${POSTGRES_PASSWORD:-agro}@db:5432/agro
+      STORAGE_DIR: /data/archivos
+    volumes:
+      - archivos:/data/archivos
+    depends_on:
+      api:
+        condition: service_healthy  # la API aplica las migraciones al arrancar
+    stop_grace_period: 60s
     restart: unless-stopped
     networks: [interna]
 

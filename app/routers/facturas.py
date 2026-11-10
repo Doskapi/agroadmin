@@ -2,7 +2,7 @@ import io
 from decimal import Decimal
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse, StreamingResponse
 from openpyxl import Workbook
 from openpyxl.styles import Font
@@ -67,7 +67,8 @@ def _commit(db: DB, factura: Factura):
         db.commit()
     except IntegrityError:
         db.rollback()
-        raise HTTPException(status.HTTP_409_CONFLICT, "Ya existe un comprobante con ese CUIT, tipo, punto de venta y número")
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Ya existe un comprobante con ese CUIT, tipo, punto de venta y número") from None
     db.refresh(factura)
 
 
@@ -288,10 +289,8 @@ def crear_manual(db: DB, data: FacturaIn, usuario: Usuario = requiere("facturas:
 
 
 @router.post("/importar", response_model=FacturaOut, status_code=202)
-async def importar(
-    db: DB, archivo: UploadFile, background: BackgroundTasks, usuario: Usuario = requiere("facturas:escribir")
-):
-    """Sube un PDF o imagen de factura. La extracción corre en segundo plano:
+async def importar(db: DB, archivo: UploadFile, usuario: Usuario = requiere("facturas:escribir")):
+    """Sube un PDF o imagen de factura. La lectura la hace el worker en segundo plano:
     consultar `GET /facturas/{id}` hasta que el estado deje de ser `procesando`."""
     data = await validar_archivo.leer_con_limite(archivo)
     content_type = validar_archivo.validar_factura(data)  # tipo real, no el que declara el navegador
@@ -315,13 +314,13 @@ async def importar(
     db.flush()
     auditar(db, usuario.id, "factura_creada", "factura", factura.id, origen="importacion",
             archivo=existente.nombre_original)
+    pipeline.encolar(db, factura)
     db.commit()
-    background.add_task(pipeline.procesar_en_segundo_plano, factura.id)
     return factura
 
 
 @router.post("/{factura_id}/reprocesar", response_model=FacturaOut, status_code=202)
-def reprocesar(db: DB, factura_id: int, background: BackgroundTasks, usuario: Usuario = requiere("facturas:escribir")):
+def reprocesar(db: DB, factura_id: int, usuario: Usuario = requiere("facturas:escribir")):
     factura = _obtener(db, factura_id)
     if not factura.archivo_id:
         raise HTTPException(422, "La factura no tiene archivo asociado")
@@ -329,8 +328,8 @@ def reprocesar(db: DB, factura_id: int, background: BackgroundTasks, usuario: Us
         raise HTTPException(409, "No se puede reprocesar una factura confirmada")
     factura.estado = EstadoFactura.procesando
     auditar(db, usuario.id, "factura_reprocesada", "factura", factura.id)
+    pipeline.encolar(db, factura)
     db.commit()
-    background.add_task(pipeline.procesar_en_segundo_plano, factura.id)
     return factura
 
 

@@ -21,7 +21,7 @@ def _commit(db: DB, cp: CartaPorte):
         db.commit()
     except IntegrityError:
         db.rollback()
-        raise HTTPException(409, "Ya existe una carta de porte con ese CTG")
+        raise HTTPException(409, "Ya existe una carta de porte con ese CTG") from None
     db.refresh(cp)
 
 

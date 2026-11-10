@@ -1,5 +1,5 @@
 import react from "@vitejs/plugin-react";
-import { defineConfig } from "vite";
+import { defineConfig } from "vitest/config";
 
 // En desarrollo, /api se redirige al backend (localhost:8000, o `api:8000` dentro de docker compose).
 const backend = process.env.API_URL ?? "http://localhost:8000";
@@ -11,5 +11,9 @@ export default defineConfig({
     proxy: {
       "/api": { target: backend, rewrite: (p) => p.replace(/^\/api/, "") },
     },
+  },
+  test: {
+    environment: "jsdom",
+    include: ["src/**/*.test.{ts,tsx}"],
   },
 });

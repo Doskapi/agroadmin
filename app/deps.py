@@ -5,6 +5,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from app import dos_pasos, sesiones
+from app.contexto import set_usuario
 from app.db import get_db
 from app.models import Sesion, Usuario
 from app.security import PERMISOS
@@ -35,6 +36,7 @@ def get_sesion(db: DB, request: Request,
     sesion = sesiones.buscar(db, token)
     if not sesion:
         raise _no_autenticado()
+    set_usuario(sesion.usuario_id)
     return sesion
 
 
@@ -72,4 +74,5 @@ def requiere(permiso: str):
             raise HTTPException(status.HTTP_403_FORBIDDEN, f"Falta el permiso '{permiso}'")
         return usuario
 
+    _check.permiso = permiso  # para los tests que revisan los permisos de cada ruta
     return Depends(_check)

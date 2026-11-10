@@ -32,3 +32,17 @@ def pdf_con_qr(texto_qr: str, con_link: bool = False) -> bytes:
     if con_link:
         page.insert_link({"kind": pymupdf.LINK_URI, "from": rect, "uri": texto_qr})
     return doc.tobytes()
+
+
+def procesar_cola() -> int:
+    """Corre el worker sobre los trabajos pendientes (en producción lo hace el servicio `worker`)."""
+    from app import trabajos
+
+    return trabajos.ejecutar_pendientes()
+
+
+def importar(client, headers, data: bytes, nombre="f.pdf", tipo="application/pdf"):
+    """Sube un archivo y procesa la cola, como si el worker ya lo hubiera leído."""
+    r = client.post("/facturas/importar", headers=headers, files={"archivo": (nombre, data, tipo)})
+    procesar_cola()
+    return r

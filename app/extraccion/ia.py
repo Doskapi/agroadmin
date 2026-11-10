@@ -2,6 +2,7 @@
 
 import base64
 import logging
+from dataclasses import dataclass
 
 import anthropic
 from pydantic import BaseModel, Field
@@ -59,14 +60,34 @@ class FacturaExtraida(BaseModel):
 
 
 class ErrorExtraccionIA(Exception):
-    pass
+    def __init__(self, mensaje: str, reintentable: bool = False):
+        super().__init__(mensaje)
+        # Errores pasajeros (límite de uso, sin conexión, servicio caído): conviene reintentar más tarde
+        self.reintentable = reintentable
 
 
 def disponible() -> bool:
     return bool(settings.anthropic_api_key)
 
 
+# Modelos sin fallback del lado del servidor (la API rechaza el parámetro `fallbacks`)
+SIN_FALLBACK = ("claude-haiku",)
+
+
+@dataclass
+class Uso:
+    modelo: str
+    tokens_entrada: int
+    tokens_salida: int
+
+
 def extraer(data: bytes, content_type: str) -> FacturaExtraida:
+    return extraer_con_uso(data, content_type)[0]
+
+
+def extraer_con_uso(data: bytes, content_type: str, modelo: str | None = None,
+                    effort: str | None = None) -> tuple[FacturaExtraida, Uso]:
+    """Extrae los datos del comprobante. `modelo`/`effort` permiten comparar alternativas (ver evaluar.py)."""
     if content_type == "application/pdf":
         bloque = {"type": "document", "source": {"type": "base64", "media_type": "application/pdf",
                                                   "data": base64.standard_b64encode(data).decode()}}
@@ -76,28 +97,35 @@ def extraer(data: bytes, content_type: str) -> FacturaExtraida:
     else:
         raise ErrorExtraccionIA(f"Tipo de archivo no soportado para IA: {content_type}")
 
+    modelo = modelo or settings.claude_model
+    extra = {}
+    if not modelo.startswith(SIN_FALLBACK):
+        # Si un clasificador de seguridad rechaza el pedido, la API lo reintenta en otro modelo.
+        extra = {"betas": ["server-side-fallback-2026-07-01"], "fallbacks": "default"}
     client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
     try:
         response = client.beta.messages.parse(
-            model=settings.claude_model,
+            model=modelo,
             max_tokens=16000,
-            output_config={"effort": "medium"},
-            # Si un clasificador de seguridad rechaza el pedido, la API lo reintenta en otro modelo.
-            betas=["server-side-fallback-2026-07-01"],
-            fallbacks="default",
+            output_config={"effort": effort or settings.claude_effort},
             messages=[{"role": "user", "content": [bloque, {"type": "text", "text": PROMPT}]}],
             output_format=FacturaExtraida,
+            **extra,
         )
     except anthropic.RateLimitError as e:
-        raise ErrorExtraccionIA("Límite de uso de la API de Claude alcanzado, reintentar más tarde") from e
+        raise ErrorExtraccionIA("Límite de uso de la API de Claude alcanzado, reintentar más tarde", True) from e
     except anthropic.APIStatusError as e:
         log.error("Error de la API de Claude (%s): %s", e.status_code, e.message)
-        raise ErrorExtraccionIA(f"Error de la API de Claude ({e.status_code}), reintentar más tarde") from e
+        raise ErrorExtraccionIA(f"Error de la API de Claude ({e.status_code}), reintentar más tarde",
+                                e.status_code >= 500) from e
     except anthropic.APIConnectionError as e:
-        raise ErrorExtraccionIA("No se pudo conectar con la API de Claude") from e
+        raise ErrorExtraccionIA("No se pudo conectar con la API de Claude", True) from e
 
     if response.stop_reason == "refusal":
         raise ErrorExtraccionIA("El modelo rechazó procesar el documento")
     if response.stop_reason == "max_tokens" or response.parsed_output is None:
         raise ErrorExtraccionIA("La respuesta del modelo quedó incompleta")
-    return response.parsed_output
+    uso = Uso(response.model, response.usage.input_tokens, response.usage.output_tokens)
+    log.info("Extracción con %s: %s tokens de entrada, %s de salida", uso.modelo, uso.tokens_entrada,
+             uso.tokens_salida)
+    return response.parsed_output, uso
