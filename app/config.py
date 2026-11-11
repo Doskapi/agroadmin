@@ -64,6 +64,25 @@ class Settings(BaseSettings):
     # Errores a Sentry (opcional)
     sentry_dsn: str | None = None
 
+    # ARCA (ex AFIP): verificación de comprobantes con el web service WSCDC. Hace falta un certificado
+    # digital de la empresa con el servicio "wscdc" asociado (se tramita en ARCA con clave fiscal).
+    arca_cuit: str | None = None  # CUIT de la empresa (receptora de las facturas)
+    arca_certificado: Path | None = None  # .crt / .pem
+    arca_clave_privada: Path | None = None  # .key
+    arca_entorno: Literal["homologacion", "produccion"] = "homologacion"
+
+    # Casilla de correo de donde se importan facturas adjuntas (IMAP). Sin IMAP_HOST no se revisa.
+    imap_host: str | None = None
+    imap_puerto: int = 993
+    imap_usuario: str | None = None
+    imap_password: str | None = None
+    imap_carpeta: str = "INBOX"
+    # Solo se aceptan correos de estos remitentes o dominios (separados por coma). Vacío = cualquiera.
+    imap_remitentes: str = ""
+
+    # Avisos por correo de facturas vencidas o por vencer (requiere SMTP), cada mañana
+    avisos_vencimientos: bool = True
+
     # El worker trae solo las cotizaciones del BCRA nuevas (si alguna vez se cargaron)
     cotizaciones_automaticas: bool = True
 

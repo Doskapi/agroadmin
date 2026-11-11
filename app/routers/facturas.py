@@ -9,7 +9,8 @@ from openpyxl.styles import Font
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
-from app import insumos, storage, validar_archivo
+from app import importacion, insumos, validar_archivo
+from app.arca import tareas as arca_tareas
 from app.auditoria import auditar, diferencias
 from app.deps import DB, UsuarioActual, requiere
 from app.extraccion import pipeline
@@ -261,6 +262,7 @@ def accion_masiva(db: DB, data: AccionMasiva, usuario: UsuarioActual):
                 continue
             factura.estado = EstadoFactura.confirmada
             auditar(db, usuario.id, "factura_confirmada", "factura", fid, masiva=True)
+            arca_tareas.encolar(db, factura)
         ok.append(fid)
     db.commit()
     return ResultadoAccionMasiva(ok=ok, errores=errores)
@@ -293,28 +295,7 @@ async def importar(db: DB, archivo: UploadFile, usuario: Usuario = requiere("fac
     """Sube un PDF o imagen de factura. La lectura la hace el worker en segundo plano:
     consultar `GET /facturas/{id}` hasta que el estado deje de ser `procesando`."""
     data = await validar_archivo.leer_con_limite(archivo)
-    content_type = validar_archivo.validar_factura(data)  # tipo real, no el que declara el navegador
-
-    digest = storage.sha256(data)
-    existente = db.scalar(select(Archivo).where(Archivo.sha256 == digest))
-    if existente:
-        previa = db.scalar(select(Factura).where(Factura.archivo_id == existente.id))
-        if previa:
-            raise HTTPException(409, f"Este archivo ya fue importado como factura #{previa.id}")
-    else:
-        existente = Archivo(
-            nombre_original=archivo.filename or "sin_nombre", content_type=content_type,
-            ruta=storage.guardar(data, content_type), sha256=digest, tamanio=len(data), subido_por_id=usuario.id,
-        )
-        db.add(existente)
-        db.flush()
-
-    factura = Factura(estado=EstadoFactura.procesando, archivo_id=existente.id, creado_por_id=usuario.id)
-    db.add(factura)
-    db.flush()
-    auditar(db, usuario.id, "factura_creada", "factura", factura.id, origen="importacion",
-            archivo=existente.nombre_original)
-    pipeline.encolar(db, factura)
+    factura = importacion.importar_factura(db, data, archivo.filename, usuario.id)
     db.commit()
     return factura
 
@@ -381,6 +362,7 @@ def confirmar(db: DB, factura_id: int, usuario: Usuario = requiere("facturas:con
         raise HTTPException(409 if factura.estado != EstadoFactura.pendiente_revision else 422, motivo)
     factura.estado = EstadoFactura.confirmada
     auditar(db, usuario.id, "factura_confirmada", "factura", factura.id)
+    arca_tareas.encolar(db, factura)
     db.commit()
     return factura
 

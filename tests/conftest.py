@@ -12,7 +12,9 @@ os.environ["ADMIN_PASSWORD"] = "admin-test-1234"
 os.environ["SECRET_KEY"] = "clave-de-tests-" + "x" * 32
 os.environ["ENTORNO"] = "produccion"
 os.environ["EXIGIR_2FA"] = ""  # los tests de 2FA obligatoria lo activan con monkeypatch
-os.environ["SMTP_HOST"] = ""  # los tests corren con las mismas validaciones que producción
+os.environ["SMTP_HOST"] = ""
+os.environ["IMAP_HOST"] = ""
+os.environ["ARCA_CUIT"] = ""  # los tests corren con las mismas validaciones que producción
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
@@ -25,9 +27,29 @@ from app.db import SessionLocal, engine  # noqa: E402
 from app.main import app  # noqa: E402
 from app.seed import seed  # noqa: E402
 
-TABLAS_DATOS = ("factura_imputaciones, factura_items, facturas, archivos, insumo_alias, insumos, cotizaciones, "
-                "proveedores, cartas_porte, lotes, campos, campanias, auditoria, sesiones, tokens_recuperacion, trabajos, "
-                "tareas_programadas")
+TABLAS_DATOS = ", ".join([
+    "pagos",
+    "ventas",
+    "comprobantes_arca",
+    "correos_importados",
+    "factura_imputaciones",
+    "factura_items",
+    "facturas",
+    "archivos",
+    "insumo_alias",
+    "insumos",
+    "cotizaciones",
+    "proveedores",
+    "cartas_porte",
+    "lotes",
+    "campos",
+    "campanias",
+    "auditoria",
+    "sesiones",
+    "tokens_recuperacion",
+    "trabajos",
+    "tareas_programadas",
+])
 
 
 @pytest.fixture(scope="session", autouse=True)

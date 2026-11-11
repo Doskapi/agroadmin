@@ -14,7 +14,20 @@ from app.contexto import ip_actual, nuevo_pedido, user_agent_actual
 from app.db import SessionLocal
 from app.logs import configurar_logs, request_id
 from app.models import TareaProgramada
-from app.routers import auditoria, auth, cartas_porte, catalogos, cotizaciones, facturas, insumos, reportes, usuarios
+from app.routers import (
+    arca,
+    auditoria,
+    auth,
+    cartas_porte,
+    catalogos,
+    cotizaciones,
+    facturas,
+    insumos,
+    pagos,
+    reportes,
+    usuarios,
+    ventas,
+)
 from app.sesiones import ahora
 
 configurar_logs()
@@ -71,7 +84,8 @@ if not settings.es_produccion:
         allow_headers=["*"],
     )
 
-for r in (auth, usuarios, auditoria, catalogos, insumos, cotizaciones, facturas, cartas_porte, reportes):
+for r in (auth, usuarios, auditoria, catalogos, insumos, cotizaciones, pagos, arca, facturas, cartas_porte, ventas,
+          reportes):
     app.include_router(r.router)
 
 

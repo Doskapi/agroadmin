@@ -14,10 +14,12 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
-from app import trabajos
+from app import avisos, correo, correo_entrante, trabajos
+from app.arca import tareas as _arca_tareas  # noqa: F401  (registra "constatar_factura")
 from app.config import settings
 from app.db import SessionLocal
-from app.extraccion import pipeline  # noqa: F401  (registra el handler "procesar_factura")
+from app.extraccion import carta_porte as _cp  # noqa: F401  (registra "procesar_carta_porte")
+from app.extraccion import pipeline  # noqa: F401  (registra "procesar_factura")
 from app.logs import configurar_logs
 from app.models import Cotizacion, EstadoFactura, Factura, TareaProgramada, Trabajo
 from app.routers.cotizaciones import _guardar, traer_del_bcra
@@ -47,9 +49,22 @@ def _actualizar_cotizaciones(db: Session) -> None:
         log.info("Cotizaciones del BCRA actualizadas: %s nuevas", n)
 
 
+def _revisar_correo(db: Session) -> None:
+    if n := correo_entrante.revisar_casilla(db):
+        log.info("Se importaron %s factura(s) desde el correo", n)
+
+
+def _avisar_vencimientos(db: Session) -> None:
+    if n := avisos.enviar(db):
+        log.info("Aviso de vencimientos enviado a %s persona(s)", n)
+
+
 PROGRAMADAS: list[Programada] = [
     Programada("actualizar_cotizaciones", timedelta(hours=6), _actualizar_cotizaciones,
                lambda: settings.cotizaciones_automaticas),
+    Programada("revisar_correo", timedelta(minutes=5), _revisar_correo, correo_entrante.configurado),
+    Programada("avisar_vencimientos", timedelta(hours=24), _avisar_vencimientos,
+               lambda: settings.avisos_vencimientos and correo.configurado()),
 ]
 
 

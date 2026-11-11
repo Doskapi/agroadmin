@@ -284,9 +284,28 @@ class FacturaUpdate(BaseModel):
     imputaciones: list[ImputacionIn] | None = None
 
 
+class PagoIn(BaseModel):
+    fecha: date
+    monto: Decimal = Field(gt=0)
+    medio: Literal["transferencia", "cheque", "echeq", "efectivo", "tarjeta", "compensacion", "otro"]
+    referencia: str | None = Field(default=None, max_length=128)
+    observaciones: str | None = None
+
+
+class PagoOut(ORM, PagoIn):
+    id: int
+    factura_id: int
+
+
 class FacturaOut(ORM, FacturaBase):
     id: int
     estado: EstadoFactura
+    pagos: list[PagoOut] = []
+    pagado: Decimal = Decimal(0)
+    saldo: Decimal | None = None
+    arca_resultado: str | None = None
+    arca_verificado: datetime | None = None
+    arca_observaciones: str | None = None
     archivo_id: int | None
     datos_extraidos: dict | None
     error_extraccion: str | None
@@ -313,6 +332,8 @@ class FacturaResumen(ORM):
     campo_id: int | None = None
     lote_id: int | None = None
     repartida: bool = False
+    saldo: Decimal | None = None
+    fecha_vencimiento: date | None = None
 
     @field_validator("repartida", mode="before")
     @classmethod
@@ -369,6 +390,12 @@ class CartaPorteIn(BaseModel):
 class CartaPorteOut(ORM, CartaPorteIn):
     id: int
     created_at: datetime
+    # Mientras se lee el PDF, estos pueden estar vacíos
+    fecha_carga: date | None
+    grano: str | None
+    archivo_id: int | None = None
+    error_extraccion: str | None = None
+    datos_extraidos: dict | None = None
 
 
 # --- Reportes --------------------------------------------------------------
@@ -514,3 +541,98 @@ class PaginaAuditoria(BaseModel):
 
 class AnularIn(BaseModel):
     motivo: str = Field(min_length=3, max_length=500)
+
+
+# --- Pagos ---------------------------------------------------------------------
+
+
+class FacturaAPagar(BaseModel):
+    id: int
+    proveedor: str | None
+    comprobante: str
+    fecha_emision: date | None
+    vencimiento: date | None
+    dias: int | None  # negativos: vencida hace N días
+    moneda: str
+    total: Decimal
+    saldo: Decimal
+    saldo_pesos: Decimal
+
+
+class CuentasAPagar(BaseModel):
+    facturas: list[FacturaAPagar]
+    vencido_pesos: Decimal
+    proximos_7_dias_pesos: Decimal
+    total_pesos: Decimal
+
+
+# --- Ventas de granos y margen ---------------------------------------------------
+
+
+class VentaIn(BaseModel):
+    fecha: date
+    campania_id: int | None = None
+    campo_id: int | None = None
+    lote_id: int | None = None
+    grano: str = Field(min_length=1, max_length=64)
+    kilos: Decimal = Field(gt=0)
+    precio_tonelada: Decimal | None = None
+    total: Decimal = Field(gt=0)
+    moneda: Literal["PES", "DOL"] = "PES"
+    cotizacion: Decimal = Field(default=Decimal(1), gt=0)
+    comprador: str | None = None
+    comprobante: str | None = None
+    observaciones: str | None = None
+
+
+class VentaOut(ORM, VentaIn):
+    id: int
+
+
+class FilaMargen(BaseModel):
+    id: int | str | None
+    clave: str | None
+    hectareas: Decimal | None
+    kilos: Decimal
+    rinde_kg_ha: Decimal | None
+    ingresos: Decimal
+    gastos: Decimal
+    margen: Decimal
+    margen_ha: Decimal | None
+
+
+# --- ARCA ------------------------------------------------------------------------
+
+
+class ResultadoImportacionArca(BaseModel):
+    leidos: int
+    nuevos: int
+    desde: date | None
+    hasta: date | None
+
+
+class ComprobanteArcaOut(ORM):
+    id: int
+    fecha: date
+    cuit_emisor: str
+    razon_social: str | None
+    tipo_comprobante: int
+    punto_venta: int
+    numero: int
+    total: Decimal | None
+    moneda: str
+
+
+class Diferencia(BaseModel):
+    factura_id: int
+    arca: ComprobanteArcaOut
+    total_cargado: Decimal | None
+
+
+class Conciliacion(BaseModel):
+    desde: date | None
+    hasta: date | None
+    coinciden: int
+    faltan_cargar: list[ComprobanteArcaOut]  # en ARCA, no en el sistema
+    no_estan_en_arca: list[FacturaResumen]  # cargadas y confirmadas, ARCA no las tiene
+    diferencias: list[Diferencia]  # mismo comprobante, distinto total

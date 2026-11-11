@@ -3,12 +3,13 @@
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
+from typing import Literal
 
 from fastapi import Query
-from sqlalchemy import Select, String, and_, case, cast, exists, func, or_
+from sqlalchemy import Select, String, and_, case, cast, exists, func, or_, select
 from sqlalchemy.orm import aliased
 
-from app.models import EstadoFactura, Factura, FacturaImputacion, FacturaItem, Proveedor
+from app.models import EstadoFactura, Factura, FacturaImputacion, FacturaItem, Pago, Proveedor
 
 NOTAS_CREDITO = (3, 8, 13, 53)
 
@@ -29,6 +30,27 @@ class FiltrosFactura:
     monto_min: Decimal | None = None
     monto_max: Decimal | None = None
     sin_imputar: bool = False
+    pago: Literal["pendiente", "vencida", "pagada"] | None = None
+
+
+def pagado():
+    """Suma de pagos de la factura (subconsulta correlacionada)."""
+    return select(func.coalesce(func.sum(Pago.monto), 0)).where(Pago.factura_id == Factura.id).scalar_subquery()
+
+
+def saldo():
+    return Factura.total - pagado()
+
+
+def vencimiento():
+    """Fecha en que vence: la del comprobante o, si no figura, la de emisión."""
+    return func.coalesce(Factura.fecha_vencimiento, Factura.fecha_emision)
+
+
+def a_pagar():
+    """Facturas que generan deuda: confirmadas, con total y que no son notas de crédito."""
+    return and_(Factura.estado == EstadoFactura.confirmada, Factura.total.is_not(None),
+                Factura.tipo_comprobante.not_in(NOTAS_CREDITO) | Factura.tipo_comprobante.is_(None))
 
 
 def filtros_query(
@@ -46,10 +68,11 @@ def filtros_query(
     monto_min: Decimal | None = None,
     monto_max: Decimal | None = None,
     sin_imputar: bool = False,
+    pago: Literal["pendiente", "vencida", "pagada"] | None = None,
 ) -> FiltrosFactura:
     """Dependencia de FastAPI: lee los filtros de la query string."""
     return FiltrosFactura(q, estado, proveedor_id, categoria_id, campania_id, campo_id, lote_id, tipo_comprobante,
-                          moneda, desde, hasta, monto_min, monto_max, sin_imputar)
+                          moneda, desde, hasta, monto_min, monto_max, sin_imputar, pago)
 
 
 def _tiene_imputaciones():
@@ -92,6 +115,14 @@ def aplicar(stmt: Select, f: FiltrosFactura, *, por_campo: bool = True) -> Selec
             Factura.campania_id.is_(None),
             and_(Factura.campo_id.is_(None), ~_tiene_imputaciones()),
         ))
+    if f.pago:
+        stmt = stmt.where(a_pagar())
+        if f.pago == "pagada":
+            stmt = stmt.where(saldo() <= Decimal("0.01"))
+        else:
+            stmt = stmt.where(saldo() > Decimal("0.01"))
+            if f.pago == "vencida":
+                stmt = stmt.where(vencimiento() < date.today())
     if f.q and (q := f.q.strip()):
         patron = f"%{q}%"
         prov = aliased(Proveedor)

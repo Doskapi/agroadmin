@@ -25,6 +25,9 @@ PERMISOS: dict[str, str] = {
     "cartas_porte:escribir": "Cargar y editar cartas de porte",
     "reportes:ver": "Ver reportes y dashboards",
     "auditoria:ver": "Ver el registro de auditoría (quién hizo qué)",
+    "pagos:escribir": "Registrar pagos de facturas",
+    "ventas:leer": "Ver ventas de granos y el margen",
+    "ventas:escribir": "Cargar ventas de granos",
 }
 
 # Roles iniciales. Se pueden editar después desde la API.
@@ -33,12 +36,13 @@ ROLES_INICIALES: dict[str, tuple[str, list[str]]] = {
     "administrativo": (
         "Carga de facturas y cartas de porte",
         ["catalogos:leer", "catalogos:escribir", "facturas:leer", "facturas:escribir",
-         "cartas_porte:leer", "cartas_porte:escribir", "reportes:ver"],
+         "cartas_porte:leer", "cartas_porte:escribir", "reportes:ver", "pagos:escribir", "ventas:leer",
+         "ventas:escribir"],
     ),
     "contador": (
         "Revisión y confirmación de facturas, reportes",
         ["catalogos:leer", "facturas:leer", "facturas:confirmar", "cartas_porte:leer", "reportes:ver",
-         "auditoria:ver"],
+         "auditoria:ver", "pagos:escribir", "ventas:leer"],
     ),
     "campo": (
         "Personal de campo: cartas de porte",

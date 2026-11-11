@@ -210,3 +210,13 @@ button.link:hover { background: none; color: var(--text); }
 details summary { font-size: 13px; }
 .historial { list-style: none; padding: 0; margin: 12px 0 0; display: flex; flex-direction: column; gap: 10px; font-size: 13px; }
 .historial li { border-left: 2px solid var(--border); padding-left: 10px; }
+
+/* --- celular --- */
+@media (max-width: 600px) {
+  .page-head h1 { font-size: 19px; }
+  .kpi-value { font-size: 22px; }
+  .modal { padding: 16px; }
+  .buscador { flex-basis: 100%; }
+  .card.flush table { font-size: 13px; }
+  th, td { padding: 8px; }
+}

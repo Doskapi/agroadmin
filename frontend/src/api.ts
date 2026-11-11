@@ -38,7 +38,12 @@ async function request(path: string, init: RequestInit = {}): Promise<Response> 
   if (init.body && !(init.body instanceof FormData) && !(init.body instanceof URLSearchParams)) {
     headers.set("Content-Type", "application/json");
   }
-  const res = await fetch(`/api${path}`, { ...init, headers, credentials: "same-origin" });
+  let res: Response;
+  try {
+    res = await fetch(`/api${path}`, { ...init, headers, credentials: "same-origin" });
+  } catch {
+    throw new ApiError(0, "Sin conexión con el servidor. Revisá internet y probá de nuevo");
+  }
   if (res.status === 401 && !path.startsWith("/auth/login")) onUnauthorized();
   if (!res.ok) {
     const body = await res.json().catch(() => null);

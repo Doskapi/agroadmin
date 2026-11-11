@@ -3,6 +3,7 @@
 import base64
 import logging
 from dataclasses import dataclass
+from typing import TypeVar
 
 import anthropic
 from pydantic import BaseModel, Field
@@ -59,6 +60,9 @@ class FacturaExtraida(BaseModel):
     items: list[ItemExtraido] = []
 
 
+T = TypeVar("T", bound=BaseModel)
+
+
 class ErrorExtraccionIA(Exception):
     def __init__(self, mensaje: str, reintentable: bool = False):
         super().__init__(mensaje)
@@ -88,15 +92,23 @@ def extraer(data: bytes, content_type: str) -> FacturaExtraida:
 def extraer_con_uso(data: bytes, content_type: str, modelo: str | None = None,
                     effort: str | None = None) -> tuple[FacturaExtraida, Uso]:
     """Extrae los datos del comprobante. `modelo`/`effort` permiten comparar alternativas (ver evaluar.py)."""
-    if content_type == "application/pdf":
-        bloque = {"type": "document", "source": {"type": "base64", "media_type": "application/pdf",
-                                                  "data": base64.standard_b64encode(data).decode()}}
-    elif content_type in TIPOS_IMAGEN:
-        bloque = {"type": "image", "source": {"type": "base64", "media_type": content_type,
-                                               "data": base64.standard_b64encode(data).decode()}}
-    else:
-        raise ErrorExtraccionIA(f"Tipo de archivo no soportado para IA: {content_type}")
+    return llamar(data, content_type, PROMPT, FacturaExtraida, modelo, effort)
 
+
+def bloque_archivo(data: bytes, content_type: str) -> dict:
+    if content_type == "application/pdf":
+        return {"type": "document", "source": {"type": "base64", "media_type": "application/pdf",
+                                               "data": base64.standard_b64encode(data).decode()}}
+    if content_type in TIPOS_IMAGEN:
+        return {"type": "image", "source": {"type": "base64", "media_type": content_type,
+                                            "data": base64.standard_b64encode(data).decode()}}
+    raise ErrorExtraccionIA(f"Tipo de archivo no soportado para IA: {content_type}")
+
+
+def llamar(data: bytes, content_type: str, prompt: str, formato: type[T], modelo: str | None = None,
+           effort: str | None = None) -> tuple[T, Uso]:
+    """Manda el archivo y el pedido a Claude y devuelve la respuesta validada contra `formato`."""
+    bloque = bloque_archivo(data, content_type)
     modelo = modelo or settings.claude_model
     extra = {}
     if not modelo.startswith(SIN_FALLBACK):
@@ -108,8 +120,8 @@ def extraer_con_uso(data: bytes, content_type: str, modelo: str | None = None,
             model=modelo,
             max_tokens=16000,
             output_config={"effort": effort or settings.claude_effort},
-            messages=[{"role": "user", "content": [bloque, {"type": "text", "text": PROMPT}]}],
-            output_format=FacturaExtraida,
+            messages=[{"role": "user", "content": [bloque, {"type": "text", "text": prompt}]}],
+            output_format=formato,
             **extra,
         )
     except anthropic.RateLimitError as e:

@@ -20,7 +20,7 @@ const TABS: { valor: EstadoFactura | ""; texto: string }[] = [
 const ACEPTA = ".pdf,.jpg,.jpeg,.png,.webp";
 // Filtros que viven en la URL (así un link desde un reporte abre el catálogo ya filtrado)
 const FILTROS = ["q", "estado", "proveedor_id", "categoria_id", "campania_id", "campo_id", "lote_id",
-  "tipo_comprobante", "moneda", "desde", "hasta", "monto_min", "monto_max", "sin_imputar"] as const;
+  "tipo_comprobante", "moneda", "desde", "hasta", "monto_min", "monto_max", "sin_imputar", "pago"] as const;
 type Orden = "fecha" | "total" | "proveedor" | "numero" | "estado";
 
 export default function Facturas() {
@@ -179,7 +179,14 @@ export default function Facturas() {
                       f.repartida ? "Repartida" : [f.campo_id && campos.get(f.campo_id), f.lote_id && lotes.get(f.lote_id)].filter(Boolean).join(" / "),
                     ].filter(Boolean).join(" · ") || <span className="muted">Sin imputar</span>}
                   </td>
-                  <td className="num">{monto(f.total, f.moneda)}</td>
+                  <td className="num">
+                    {monto(f.total, f.moneda)}
+                    {f.estado === "confirmada" && f.saldo != null && Number(f.saldo) > 0.01 && (
+                      <div className="muted" style={{ fontSize: 11 }}>
+                        {Number(f.saldo) < Number(f.total) ? `saldo ${monto(f.saldo, f.moneda)}` : "impaga"}
+                      </div>
+                    )}
+                  </td>
                   <td><BadgeFactura estado={f.estado} /></td>
                 </tr>
               ))}
@@ -223,7 +230,7 @@ function PanelFiltros({ filtros, setFiltro, limpiar }: {
   const campos = useCampos();
   const lotes = campos.data?.find((c) => String(c.id) === filtros.campo_id)?.lotes ?? [];
   const avanzados = ["categoria_id", "campania_id", "campo_id", "lote_id", "tipo_comprobante", "moneda",
-    "monto_min", "monto_max", "sin_imputar"];
+    "monto_min", "monto_max", "sin_imputar", "pago"];
   const [abierto, setAbierto] = useState(() => avanzados.some((k) => filtros[k]));
 
   // La búsqueda se aplica cuando se deja de tipear
@@ -298,6 +305,14 @@ function PanelFiltros({ filtros, setFiltro, limpiar }: {
               <option value="">Todas</option>
               <option value="PES">Pesos</option>
               <option value="DOL">Dólares</option>
+            </select>
+          </Field>
+          <Field label="Pago">
+            <select {...sel("pago")}>
+              <option value="">Todas</option>
+              <option value="pendiente">Con saldo</option>
+              <option value="vencida">Vencidas impagas</option>
+              <option value="pagada">Pagadas</option>
             </select>
           </Field>
           <Field label="Total desde"><input type="number" step="0.01" style={{ width: 120 }} {...sel("monto_min")} /></Field>
@@ -414,6 +429,9 @@ function ModalImputar({ onClose, onAplicar, pending }: {
 
 function Importador({ onImportado }: { onImportado: () => void }) {
   const input = useRef<HTMLInputElement>(null);
+  const camara = useRef<HTMLInputElement>(null);
+  // En el celular, botón para sacar la foto directamente con la cámara
+  const tactil = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
   const [over, setOver] = useState(false);
   const [subiendo, setSubiendo] = useState(0);
   const [errores, setErrores] = useState<string[]>([]);
@@ -470,6 +488,15 @@ function Importador({ onImportado }: { onImportado: () => void }) {
         <input ref={input} type="file" accept={ACEPTA} multiple hidden
           onChange={(e) => { if (e.target.files) subir(e.target.files); e.target.value = ""; }} />
       </div>
+      {tactil && (
+        <>
+          <button type="button" className="primary" onClick={() => camara.current?.click()} disabled={subiendo > 0}>
+            📷 Sacar foto de una factura
+          </button>
+          <input ref={camara} type="file" accept="image/*" capture="environment" hidden
+            onChange={(e) => { if (e.target.files) subir(e.target.files); e.target.value = ""; }} />
+        </>
+      )}
       {errores.length > 0 && (
         <div className="alert critical">
           No se pudieron importar:

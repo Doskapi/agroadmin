@@ -10,7 +10,10 @@ export type Permiso =
   | "cartas_porte:leer"
   | "cartas_porte:escribir"
   | "reportes:ver"
-  | "auditoria:ver";
+  | "auditoria:ver"
+  | "pagos:escribir"
+  | "ventas:leer"
+  | "ventas:escribir";
 
 export interface Usuario {
   id: number;
@@ -142,7 +145,45 @@ export interface Factura extends FacturaCampos {
   proveedor: Proveedor | null;
   items: FacturaItem[];
   imputaciones: Imputacion[];
+  pagos: Pago[];
+  pagado: string;
+  saldo: string | null;
+  arca_resultado: "A" | "R" | null;
+  arca_verificado: string | null;
+  arca_observaciones: string | null;
   created_at: string;
+}
+
+export type MedioPago = "transferencia" | "cheque" | "echeq" | "efectivo" | "tarjeta" | "compensacion" | "otro";
+
+export interface Pago {
+  id: number;
+  factura_id: number;
+  fecha: string;
+  monto: string;
+  medio: MedioPago;
+  referencia: string | null;
+  observaciones: string | null;
+}
+
+export interface FacturaAPagar {
+  id: number;
+  proveedor: string | null;
+  comprobante: string;
+  fecha_emision: string | null;
+  vencimiento: string | null;
+  dias: number | null;
+  moneda: string;
+  total: string;
+  saldo: string;
+  saldo_pesos: string;
+}
+
+export interface CuentasAPagar {
+  facturas: FacturaAPagar[];
+  vencido_pesos: string;
+  proximos_7_dias_pesos: string;
+  total_pesos: string;
 }
 
 export interface FacturaResumen {
@@ -162,6 +203,8 @@ export interface FacturaResumen {
   campo_id: number | null;
   lote_id: number | null;
   repartida: boolean;
+  saldo: string | null;
+  fecha_vencimiento: string | null;
 }
 
 export interface CatalogoFacturas {
@@ -175,17 +218,17 @@ export interface ResultadoAccionMasiva {
   errores: Record<string, string>;
 }
 
-export type EstadoCartaPorte = "borrador" | "emitida" | "descargada" | "anulada";
+export type EstadoCartaPorte = "procesando" | "borrador" | "emitida" | "descargada" | "anulada";
 
 export interface CartaPorte {
   id: number;
   estado: EstadoCartaPorte;
   numero_ctg: string | null;
-  fecha_carga: string;
+  fecha_carga: string | null;
   campania_id: number | null;
   campo_id: number | null;
   lote_id: number | null;
-  grano: string;
+  grano: string | null;
   kilos_brutos: string | null;
   kilos_tara: string | null;
   kilos_netos: string | null;
@@ -198,6 +241,8 @@ export interface CartaPorte {
   patente_acoplado: string | null;
   km_recorrer: number | null;
   observaciones: string | null;
+  archivo_id?: number | null;
+  error_extraccion?: string | null;
 }
 
 export interface FilaReporte {
@@ -291,4 +336,54 @@ export interface Cotizacion {
   fecha: string;
   valor: string;
   moneda: string;
+}
+
+export interface Venta {
+  id: number;
+  fecha: string;
+  campania_id: number | null;
+  campo_id: number | null;
+  lote_id: number | null;
+  grano: string;
+  kilos: string;
+  precio_tonelada: string | null;
+  total: string;
+  moneda: "PES" | "DOL";
+  cotizacion: string;
+  comprador: string | null;
+  comprobante: string | null;
+  observaciones: string | null;
+}
+
+export interface FilaMargen {
+  id: number | string | null;
+  clave: string | null;
+  hectareas: string | null;
+  kilos: string;
+  rinde_kg_ha: string | null;
+  ingresos: string;
+  gastos: string;
+  margen: string;
+  margen_ha: string | null;
+}
+
+export interface ComprobanteArca {
+  id: number;
+  fecha: string;
+  cuit_emisor: string;
+  razon_social: string | null;
+  tipo_comprobante: number;
+  punto_venta: number;
+  numero: number;
+  total: string | null;
+  moneda: string;
+}
+
+export interface Conciliacion {
+  desde: string | null;
+  hasta: string | null;
+  coinciden: number;
+  faltan_cargar: ComprobanteArca[];
+  no_estan_en_arca: FacturaResumen[];
+  diferencias: { factura_id: number; arca: ComprobanteArca; total_cargado: string | null }[];
 }

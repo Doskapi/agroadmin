@@ -7,7 +7,10 @@ import type { Permiso, Resumen } from "../types";
 const LINKS: { to: string; texto: string; permiso: Permiso }[] = [
   { to: "/", texto: "Dashboard", permiso: "reportes:ver" },
   { to: "/facturas", texto: "Facturas", permiso: "facturas:leer" },
+  { to: "/pagos", texto: "A pagar", permiso: "facturas:leer" },
+  { to: "/arca", texto: "Conciliación ARCA", permiso: "facturas:leer" },
   { to: "/cartas-porte", texto: "Cartas de porte", permiso: "cartas_porte:leer" },
+  { to: "/ventas", texto: "Ventas", permiso: "ventas:leer" },
   { to: "/reportes", texto: "Reportes", permiso: "reportes:ver" },
   { to: "/catalogos", texto: "Catálogos", permiso: "catalogos:leer" },
   { to: "/usuarios", texto: "Usuarios", permiso: "usuarios:admin" },
