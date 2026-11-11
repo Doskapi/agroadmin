@@ -21,6 +21,7 @@ export function BadgeFactura({ estado }: { estado: EstadoFactura }) {
 }
 
 const ESTADO_CP: Record<EstadoCartaPorte, string> = {
+  procesando: "info",
   borrador: "muted",
   emitida: "info",
   descargada: "good",

@@ -4,6 +4,7 @@ import { Link, useParams } from "react-router-dom";
 import { api, apiBlob } from "../api";
 import { useAuth } from "../auth";
 import { ACCIONES, DetalleAuditoria, fechaHora } from "../components/Auditoria";
+import { PagosFactura } from "../components/Pagos";
 import { BadgeFactura, Cargando, ErrorMsg, Field, Modal, nullSiVacio, numOrNull } from "../components/ui";
 import { comprobante, fecha, pesos, TIPOS_COMPROBANTE } from "../format";
 import { porId, useCampanias, useCampos, useCategorias, useInsumos, useProveedores } from "../hooks";
@@ -162,6 +163,7 @@ export default function FacturaDetalle() {
         <div className="alert warning"><span className="spinner" /> Leyendo el comprobante… se actualiza solo.</div>
       )}
       {f.error_extraccion && <div className="alert critical">{f.error_extraccion}</div>}
+      <EstadoArca f={f} onPedido={refrescar} />
       {advertencias.length > 0 && (
         <div className="alert warning">
           Revisar:
@@ -178,6 +180,7 @@ export default function FacturaDetalle() {
           setItems={(v) => { setItems(v); setSucio(true); }}
           reparto={reparto} setReparto={(v) => { setReparto(v); setSucio(true); }} />}
       </div>
+      <PagosFactura factura={f} />
       <Historial facturaId={f.id} />
     </div>
   );
@@ -467,4 +470,35 @@ function Historial({ facturaId }: { facturaId: number }) {
       ))}
     </div>
   );
+}
+
+/** Resultado de la constatación del comprobante en ARCA (y botón para pedirla). */
+function EstadoArca({ f, onPedido }: { f: Factura; onPedido: (f: Factura) => void }) {
+  const { puede } = useAuth();
+  const estado = useQuery({
+    queryKey: ["arca-estado"],
+    queryFn: () => api<{ verificacion_configurada: boolean }>("/arca/estado"),
+    staleTime: Infinity,
+  });
+  const pedir = useMutation({
+    mutationFn: () => api<Factura>(`/facturas/${f.id}/verificar-arca`, { method: "POST" }),
+    onSuccess: onPedido,
+  });
+  if (!estado.data?.verificacion_configurada || !f.cae) return null;
+  const boton = puede("facturas:escribir") && (
+    <button className="small" disabled={pedir.isPending || pedir.isSuccess} onClick={() => pedir.mutate()}>
+      {pedir.isSuccess ? "Pedido enviado" : f.arca_verificado ? "Volver a verificar" : "Verificar en ARCA"}
+    </button>
+  );
+  if (f.arca_resultado === "A") {
+    return <div className="alert good row" style={{ justifyContent: "space-between" }}>
+      <span>✓ Comprobante válido según ARCA ({fechaHora(f.arca_verificado!)})</span>{boton}</div>;
+  }
+  if (f.arca_resultado === "R") {
+    return <div className="alert critical row" style={{ justifyContent: "space-between" }}>
+      <span>✗ ARCA rechazó el comprobante: {f.arca_observaciones}</span>{boton}</div>;
+  }
+  return <div className="alert info row" style={{ justifyContent: "space-between" }}>
+    <span>{f.arca_observaciones ? `No se pudo verificar en ARCA: ${f.arca_observaciones}` : "Sin verificar en ARCA."}</span>
+    {boton}<ErrorMsg error={pedir.error} /></div>;
 }

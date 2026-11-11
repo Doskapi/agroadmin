@@ -251,6 +251,10 @@ class Factura(Timestamps, Base):
 
     cae: Mapped[str | None] = mapped_column(String(14))
     cae_vencimiento: Mapped[date | None] = mapped_column(Date)
+    # Resultado de constatar el comprobante en ARCA (WSCDC): "A" aprobado, "R" rechazado; y el detalle
+    arca_resultado: Mapped[str | None] = mapped_column(String(1))
+    arca_verificado: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    arca_observaciones: Mapped[str | None] = mapped_column(Text)
 
     campania_id: Mapped[int | None] = mapped_column(ForeignKey("campanias.id"), index=True)
     campo_id: Mapped[int | None] = mapped_column(ForeignKey("campos.id"), index=True)
@@ -271,10 +275,22 @@ class Factura(Timestamps, Base):
     imputaciones: Mapped[list["FacturaImputacion"]] = relationship(
         cascade="all, delete-orphan", order_by="FacturaImputacion.id", lazy="selectin"
     )
+    pagos: Mapped[list["Pago"]] = relationship(cascade="all, delete-orphan", order_by="Pago.fecha", lazy="selectin")
 
     @property
     def repartida(self) -> bool:
         return bool(self.imputaciones)
+
+    @property
+    def pagado(self) -> Decimal:
+        return sum((p.monto for p in self.pagos), Decimal(0)).quantize(Decimal("0.01"))
+
+    @property
+    def saldo(self) -> Decimal | None:
+        """Lo que falta pagar, en la moneda de la factura (las notas de crédito no se pagan)."""
+        if self.total is None or self.tipo_comprobante in (3, 8, 13, 53):
+            return None
+        return max(self.total - self.pagado, Decimal(0))
 
 
 class FacturaItem(Base):
@@ -345,6 +361,7 @@ class Cotizacion(Base):
 
 
 class EstadoCartaPorte(str, enum.Enum):
+    procesando = "procesando"
     borrador = "borrador"
     emitida = "emitida"
     descargada = "descargada"
@@ -359,12 +376,12 @@ class CartaPorte(Timestamps, Base):
         Enum(EstadoCartaPorte, name="estado_carta_porte"), default=EstadoCartaPorte.borrador, index=True
     )
     numero_ctg: Mapped[str | None] = mapped_column(String(20), unique=True)
-    fecha_carga: Mapped[date] = mapped_column(Date, index=True)
+    fecha_carga: Mapped[date | None] = mapped_column(Date, index=True)  # vacía mientras se lee el PDF
 
     campania_id: Mapped[int | None] = mapped_column(ForeignKey("campanias.id"), index=True)
     campo_id: Mapped[int | None] = mapped_column(ForeignKey("campos.id"), index=True)
     lote_id: Mapped[int | None] = mapped_column(ForeignKey("lotes.id"))
-    grano: Mapped[str] = mapped_column(String(64))  # soja, maíz, trigo...
+    grano: Mapped[str | None] = mapped_column(String(64))  # soja, maíz, trigo...
 
     kilos_brutos: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
     kilos_tara: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
@@ -380,6 +397,9 @@ class CartaPorte(Timestamps, Base):
     km_recorrer: Mapped[int | None] = mapped_column(Integer)
     observaciones: Mapped[str | None] = mapped_column(Text)
     creado_por_id: Mapped[int | None] = mapped_column(ForeignKey("usuarios.id"))
+    archivo_id: Mapped[int | None] = mapped_column(ForeignKey("archivos.id"))
+    datos_extraidos: Mapped[dict | None] = mapped_column(JsonDoc)
+    error_extraccion: Mapped[str | None] = mapped_column(Text)
 
 
 # ---------------------------------------------------------------------------
@@ -423,3 +443,79 @@ class TareaProgramada(Base):
 
     nombre: Mapped[str] = mapped_column(String(64), primary_key=True)
     ultima_ejecucion: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+# ---------------------------------------------------------------------------
+# Pagos, ventas, ARCA y correo
+# ---------------------------------------------------------------------------
+
+
+class Pago(Base):
+    """Pago (total o parcial) de una factura, en la moneda de la factura."""
+
+    __tablename__ = "pagos"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    factura_id: Mapped[int] = mapped_column(ForeignKey("facturas.id", ondelete="CASCADE"), index=True)
+    fecha: Mapped[date] = mapped_column(Date)
+    monto: Mapped[Decimal] = mapped_column(Monto)
+    medio: Mapped[str] = mapped_column(String(32))  # transferencia, cheque, echeq, efectivo, otro
+    referencia: Mapped[str | None] = mapped_column(String(128))
+    observaciones: Mapped[str | None] = mapped_column(Text)
+    creado_por_id: Mapped[int | None] = mapped_column(ForeignKey("usuarios.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Venta(Timestamps, Base):
+    """Venta de granos (liquidación): el ingreso que se compara contra los gastos."""
+
+    __tablename__ = "ventas"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    fecha: Mapped[date] = mapped_column(Date, index=True)
+    campania_id: Mapped[int | None] = mapped_column(ForeignKey("campanias.id"), index=True)
+    campo_id: Mapped[int | None] = mapped_column(ForeignKey("campos.id"), index=True)
+    lote_id: Mapped[int | None] = mapped_column(ForeignKey("lotes.id"))
+    grano: Mapped[str] = mapped_column(String(64))
+    kilos: Mapped[Decimal] = mapped_column(Numeric(14, 2))
+    precio_tonelada: Mapped[Decimal | None] = mapped_column(Numeric(16, 4))
+    total: Mapped[Decimal] = mapped_column(Monto)  # neto cobrado (después de gastos comerciales)
+    moneda: Mapped[str] = mapped_column(String(3), default="PES")
+    cotizacion: Mapped[Decimal] = mapped_column(Numeric(14, 6), default=1)
+    comprador: Mapped[str | None] = mapped_column(String(255))
+    comprobante: Mapped[str | None] = mapped_column(String(64))  # n° de liquidación (LPG)
+    observaciones: Mapped[str | None] = mapped_column(Text)
+    creado_por_id: Mapped[int | None] = mapped_column(ForeignKey("usuarios.id"))
+
+
+class ComprobanteArca(Base):
+    """Comprobante recibido según ARCA ("Mis Comprobantes Recibidos"), para conciliar con las facturas cargadas."""
+
+    __tablename__ = "comprobantes_arca"
+    __table_args__ = (UniqueConstraint("cuit_emisor", "tipo_comprobante", "punto_venta", "numero"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    fecha: Mapped[date] = mapped_column(Date, index=True)
+    cuit_emisor: Mapped[str] = mapped_column(String(11))
+    razon_social: Mapped[str | None] = mapped_column(String(255))
+    tipo_comprobante: Mapped[int]
+    punto_venta: Mapped[int]
+    numero: Mapped[int]
+    total: Mapped[Decimal | None] = mapped_column(Monto)
+    moneda: Mapped[str] = mapped_column(String(3), default="PES")
+    cae: Mapped[str | None] = mapped_column(String(14))
+    importado: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CorreoImportado(Base):
+    """Correo leído de la casilla de facturas (para no procesarlo dos veces y ver qué pasó)."""
+
+    __tablename__ = "correos_importados"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    message_id: Mapped[str] = mapped_column(String(512), unique=True)
+    fecha: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    remitente: Mapped[str | None] = mapped_column(String(255))
+    asunto: Mapped[str | None] = mapped_column(String(512))
+    facturas: Mapped[list | None] = mapped_column(JsonDoc)  # ids creados
+    detalle: Mapped[str | None] = mapped_column(Text)  # adjuntos ignorados o errores

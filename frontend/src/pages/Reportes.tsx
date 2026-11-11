@@ -8,14 +8,15 @@ import { Cargando, ErrorMsg, Field } from "../components/ui";
 import { capitalizar, dolaresCompacto, enMoneda, fecha, mes, num, pesos, pesosCompacto, rangoMes } from "../format";
 import { useCampanias, useCampos } from "../hooks";
 import type {
-  Agrupar, FilaCostoHectarea, FilaIva, FilaReporte, PrecioInsumo, ReporteCruce, ResumenInsumo,
+  Agrupar, FilaCostoHectarea, FilaIva, FilaMargen, FilaReporte, PrecioInsumo, ReporteCruce, ResumenInsumo,
 } from "../types";
 
 const AGRUPAR: Record<Agrupar, string> = {
   mes: "Mes", categoria: "Rubro", proveedor: "Proveedor", campo: "Campo", lote: "Lote", campania: "Campaña",
 };
 const VISTAS = {
-  gastos: "Gastos", cruce: "Cruce", hectarea: "Costo por hectárea", iva: "IVA compras", insumos: "Insumos",
+  gastos: "Gastos", cruce: "Cruce", hectarea: "Costo por hectárea", margen: "Margen", iva: "IVA compras",
+  insumos: "Insumos",
 } as const;
 type Vista = keyof typeof VISTAS;
 type Moneda = "ARS" | "USD";
@@ -57,13 +58,15 @@ export default function Reportes() {
     campania_id: "", campo_id: "", desde: "", hasta: "", incluir_pendientes: false, expresado_en: "ARS",
   });
   const set = (k: keyof Filtros) => (e: { target: { value: string } }) => setF((p) => ({ ...p, [k]: e.target.value }));
-  const conMoneda = vista === "gastos" || vista === "cruce" || vista === "hectarea";
+  const conMoneda = vista === "gastos" || vista === "cruce" || vista === "hectarea" || vista === "margen";
+  const { puede } = useAuth();
+  const vistas = Object.entries(VISTAS).filter(([k]) => k !== "margen" || puede("ventas:leer"));
 
   return (
     <div className="stack">
       <div className="page-head"><h1>Reportes</h1></div>
       <div className="tabs" role="tablist" style={{ marginBottom: 0 }}>
-        {Object.entries(VISTAS).map(([k, v]) => (
+        {vistas.map(([k, v]) => (
           <button key={k} role="tab" aria-selected={vista === k} className={vista === k ? "active" : ""}
             onClick={() => setParams({ vista: k }, { replace: true })}>
             {v}
@@ -109,6 +112,7 @@ export default function Reportes() {
       {vista === "gastos" && <Gastos f={f} />}
       {vista === "cruce" && <Cruce f={f} />}
       {vista === "hectarea" && <CostoHectarea f={f} />}
+      {vista === "margen" && <Margen f={f} />}
       {vista === "iva" && <Iva f={f} />}
       {vista === "insumos" && <Insumos f={f} />}
     </div>
@@ -374,6 +378,69 @@ function CostoHectarea({ f }: { f: Filtros }) {
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+// --- Margen ------------------------------------------------------------------------------
+
+function Margen({ f }: { f: Filtros }) {
+  const [agrupar, setAgrupar] = useState<"campania" | "campo" | "lote">("campania");
+  const query = qs({ ...f, agrupar });
+  const datos = useQuery({ queryKey: ["reporte-margen", query], queryFn: () => api<FilaMargen[]>(`/reportes/margen${query}`) });
+  const fmt = enMoneda(f.expresado_en);
+  const filas = datos.data ?? [];
+  const suma = (k: "ingresos" | "gastos" | "margen") => filas.reduce((s, x) => s + Number(x[k]), 0);
+
+  return (
+    <div className="stack">
+      <div className="row">
+        <Field label="Por">
+          <select value={agrupar} onChange={(e) => setAgrupar(e.target.value as typeof agrupar)}>
+            <option value="campania">Campaña</option>
+            <option value="campo">Campo</option>
+            <option value="lote">Lote</option>
+          </select>
+        </Field>
+      </div>
+      <ErrorMsg error={datos.error} />
+      {datos.isPending ? <Cargando /> : (
+        <div className="card flush table-wrap">
+          <table>
+            <thead>
+              <tr><th>{AGRUPAR[agrupar]}</th><th className="num">Kilos vendidos</th><th className="num">Rinde (kg/ha)</th>
+                <th className="num">Ingresos</th><th className="num">Gastos</th><th className="num">Margen</th>
+                <th className="num">Margen por ha</th></tr>
+            </thead>
+            <tbody>
+              {filas.map((x) => (
+                <tr key={String(x.id)}>
+                  <td>{x.clave ?? "(sin asignar)"}</td>
+                  <td className="num">{num(x.kilos)}</td>
+                  <td className="num">{x.rinde_kg_ha ? num(x.rinde_kg_ha) : "—"}</td>
+                  <td className="num">{fmt(x.ingresos)}</td>
+                  <td className="num">{fmt(x.gastos)}</td>
+                  <td className="num" style={{ fontWeight: 600, color: Number(x.margen) < 0 ? "var(--critical-text)" : undefined }}>{fmt(x.margen)}</td>
+                  <td className="num">{x.margen_ha ? fmt(x.margen_ha) : "—"}</td>
+                </tr>
+              ))}
+              {filas.length > 0 && (
+                <tr style={{ fontWeight: 600 }}>
+                  <td>Total</td><td /><td />
+                  <td className="num">{fmt(suma("ingresos"))}</td>
+                  <td className="num">{fmt(suma("gastos"))}</td>
+                  <td className="num">{fmt(suma("margen"))}</td><td />
+                </tr>
+              )}
+            </tbody>
+          </table>
+          {!filas.length && <div className="empty">Sin ventas ni gastos con estos filtros.</div>}
+        </div>
+      )}
+      <div className="muted" style={{ fontSize: 12 }}>
+        Ingresos: ventas de granos (neto cobrado). Gastos: facturas confirmadas imputadas (las repartidas, según su porcentaje).
+        El margen por hectárea usa las hectáreas cargadas en Catálogos.
+      </div>
     </div>
   );
 }

@@ -3,6 +3,7 @@ import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { useAuth } from "./auth";
 import { Cargando, ErrorMsg } from "./components/ui";
 import Layout from "./components/Layout";
+import Arca from "./pages/Arca";
 import Auditoria from "./pages/Auditoria";
 import CartasPorte from "./pages/CartasPorte";
 import Catalogos from "./pages/Catalogos";
@@ -11,9 +12,11 @@ import Dashboard from "./pages/Dashboard";
 import FacturaDetalle from "./pages/FacturaDetalle";
 import Facturas from "./pages/Facturas";
 import Login from "./pages/Login";
+import Pagos from "./pages/Pagos";
 import Reportes from "./pages/Reportes";
 import Restablecer from "./pages/Restablecer";
 import Usuarios from "./pages/Usuarios";
+import Ventas from "./pages/Ventas";
 import type { Permiso } from "./types";
 
 function Requiere({ permiso, children }: { permiso: Permiso; children: ReactNode }) {
@@ -69,6 +72,9 @@ export default function App() {
         <Route index element={<Inicio />} />
         <Route path="facturas" element={<Requiere permiso="facturas:leer"><Facturas /></Requiere>} />
         <Route path="facturas/:id" element={<Requiere permiso="facturas:leer"><FacturaDetalle /></Requiere>} />
+        <Route path="pagos" element={<Requiere permiso="facturas:leer"><Pagos /></Requiere>} />
+        <Route path="arca" element={<Requiere permiso="facturas:leer"><Arca /></Requiere>} />
+        <Route path="ventas" element={<Requiere permiso="ventas:leer"><Ventas /></Requiere>} />
         <Route path="cartas-porte" element={<Requiere permiso="cartas_porte:leer"><CartasPorte /></Requiere>} />
         <Route path="reportes" element={<Requiere permiso="reportes:ver"><Reportes /></Requiere>} />
         <Route path="catalogos" element={<Requiere permiso="catalogos:leer"><Catalogos /></Requiere>} />

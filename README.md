@@ -39,6 +39,27 @@ El servicio `worker` lee las facturas importadas (cola de trabajos en Postgres) 
 - **Insumos**: en Catálogos → Insumos se asignan las descripciones de ítems a insumos normalizados; las
   descripciones iguales (sin importar mayúsculas, tildes o puntuación) se asignan solas, también en facturas futuras.
 
+## Pagos, ventas, ARCA y correo
+
+- **Cuentas a pagar** ("A pagar"): facturas confirmadas con saldo, de la que vence primero (si no tiene
+  vencimiento se toma la emisión). Se registran pagos parciales o totales desde ahí o desde cada factura; el
+  catálogo filtra por pagadas, con saldo o vencidas. Con SMTP configurado, cada mañana se manda por correo a
+  quienes pagan o confirman facturas la lista de vencidas y de las que vencen en la semana (`AVISOS_VENCIMIENTOS`).
+- **Ventas de granos y margen**: se cargan las liquidaciones (kilos, total cobrado, campaña, campo/lote) y en
+  Reportes → Margen se ven ingresos, gastos, margen, rinde (kg/ha) y margen por hectárea.
+- **Conciliación con ARCA**: subí el CSV o Excel de *Mis Comprobantes → Recibidos* en "Conciliación ARCA" y se
+  marcan los comprobantes que faltan cargar, las facturas confirmadas que ARCA no tiene y las diferencias de total.
+- **Verificación del CAE (WSCDC)**: con `ARCA_CUIT`, `ARCA_CERTIFICADO` y `ARCA_CLAVE_PRIVADA` (certificado de la
+  empresa con el servicio `wscdc` asociado), cada factura confirmada se verifica sola en ARCA y queda marcada como
+  válida o rechazada. **Probar primero con `ARCA_ENTORNO=homologacion`** (la integración se probó con respuestas
+  simuladas, no contra los servidores de ARCA).
+- **Facturas por correo**: con `IMAP_HOST`/`IMAP_USUARIO`/`IMAP_PASSWORD`, el worker revisa la casilla cada
+  5 minutos e importa los PDF y fotos adjuntos (restringible por remitente con `IMAP_REMITENTES`).
+- **Cartas de porte desde PDF o foto**: "Importar PDF o foto" en Cartas de porte; Claude lee la CPE y queda como
+  borrador para revisar (requiere `ANTHROPIC_API_KEY`).
+- **App en el celular**: se puede instalar desde el navegador ("Agregar a pantalla de inicio") y tiene un botón para
+  sacar la foto de la factura con la cámara. Los datos nunca se guardan en el teléfono: siempre vienen del servidor.
+
 ## Seguridad
 
 - **Claves obligatorias.** Con `ENTORNO=produccion` (el valor por defecto) la API no arranca si `SECRET_KEY`

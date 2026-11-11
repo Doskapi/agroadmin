@@ -35,6 +35,7 @@ from app.models import (
     Insumo,
     Lote,
     Proveedor,
+    Venta,
 )
 from app.schemas import (
     Celda,
@@ -42,6 +43,7 @@ from app.schemas import (
     FaltanCotizaciones,
     FilaCostoHectarea,
     FilaIva,
+    FilaMargen,
     FilaReporte,
     PrecioInsumo,
     ReporteCruce,
@@ -320,6 +322,63 @@ def cotizaciones_faltantes(db: DB, f: Filtros, incluir_pendientes: bool = False)
     stmt = aplicar(stmt, FiltrosFactura(**{**f.__dict__, "estado": _estados(incluir_pendientes)}))
     n, primera = db.execute(stmt).one()
     return FaltanCotizaciones(facturas_sin_cotizacion=n, primera_fecha_faltante=primera)
+
+
+# --- Margen (ventas - gastos) -----------------------------------------------------
+
+
+@router.get("/margen", response_model=list[FilaMargen], dependencies=[requiere("ventas:leer")])
+def margen(db: DB, f: Filtros, agrupar: Agrupar = Agrupar.campania, expresado_en: Moneda = Moneda.ARS,
+           incluir_pendientes: bool = False):
+    """Ingresos por ventas de granos menos gastos, por campaña, campo o lote (con rinde y margen por hectárea).
+    Las ventas se filtran por fecha, campaña y campo; los gastos con los mismos filtros que el resto de reportes."""
+    if agrupar not in (Agrupar.campania, Agrupar.campo, Agrupar.lote):
+        raise HTTPException(422, "El margen se agrupa por campaña, campo o lote")
+    gastos = {x.id: (x.clave, x.total) for x in _gastos(db, agrupar, f, expresado_en, incluir_pendientes)}
+
+    col_id, tabla, nombre = {
+        Agrupar.campania: (Venta.campania_id, Campania, Campania.nombre),
+        Agrupar.campo: (Venta.campo_id, Campo, Campo.nombre),
+        Agrupar.lote: (Venta.lote_id, Lote, func.concat(Campo.nombre, " / ", Lote.nombre)),
+    }[agrupar]
+    if expresado_en == Moneda.ARS:
+        importe = Venta.total * Venta.cotizacion
+    else:
+        cot = (select(Cotizacion.valor).where(Cotizacion.moneda == "DOL", Cotizacion.fecha <= Venta.fecha)
+               .order_by(Cotizacion.fecha.desc()).limit(1).correlate(Venta).scalar_subquery())
+        importe = case((Venta.moneda == "DOL", Venta.total), else_=Venta.total * Venta.cotizacion / cot)
+    stmt = select(col_id, nombre, func.sum(Venta.kilos), func.sum(importe)).select_from(Venta).outerjoin(
+        tabla, col_id == tabla.id)
+    if agrupar == Agrupar.lote:
+        stmt = stmt.outerjoin(Campo, Lote.campo_id == Campo.id)
+    for col, v in ((Venta.campania_id, f.campania_id), (Venta.campo_id, f.campo_id), (Venta.lote_id, f.lote_id)):
+        if v is not None:
+            stmt = stmt.where(col == v)
+    if f.desde:
+        stmt = stmt.where(Venta.fecha >= f.desde)
+    if f.hasta:
+        stmt = stmt.where(Venta.fecha <= f.hasta)
+    ventas = {i: (n, k, t) for i, n, k, t in db.execute(stmt.group_by(col_id, nombre))}
+
+    hectareas: dict = {}
+    if agrupar == Agrupar.campo:
+        hectareas = dict(db.execute(select(Campo.id, Campo.hectareas)).all())
+    elif agrupar == Agrupar.lote:
+        hectareas = dict(db.execute(select(Lote.id, Lote.hectareas)).all())
+
+    filas = []
+    for clave in set(gastos) | set(ventas):
+        nombre_v, kilos, ingresos = ventas.get(clave, (None, Decimal(0), Decimal(0)))
+        nombre_g, gasto = gastos.get(clave, (None, Decimal(0)))
+        ingresos, kilos = _dec(ingresos), Decimal(kilos or 0)
+        ha = hectareas.get(clave)
+        m = ingresos - gasto
+        filas.append(FilaMargen(
+            id=clave, clave=nombre_v or nombre_g, hectareas=ha, kilos=kilos,
+            rinde_kg_ha=(kilos / ha).quantize(CENTAVO) if ha and kilos else None,
+            ingresos=ingresos, gastos=gasto, margen=m, margen_ha=(m / ha).quantize(CENTAVO) if ha else None,
+        ))
+    return sorted(filas, key=lambda x: (x.clave is None, x.clave or ""))
 
 
 # --- Insumos -------------------------------------------------------------------

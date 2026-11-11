@@ -6,7 +6,8 @@ import { BarrasRanking, BarrasTiempo } from "../components/Charts";
 import { Cargando, ErrorMsg, Field } from "../components/ui";
 import { capitalizar, mes, num, pesos } from "../format";
 import { useCampanias } from "../hooks";
-import type { FilaReporte, Resumen } from "../types";
+import { useAuth } from "../auth";
+import type { CuentasAPagar, FilaReporte, Resumen } from "../types";
 
 const aPuntos = (filas: FilaReporte[], etiqueta: (c: string | null) => string) =>
   filas.map((f) => ({ etiqueta: etiqueta(f.clave), valor: Number(f.total), cantidad: f.cantidad }));
@@ -19,6 +20,12 @@ export default function Dashboard() {
     queryFn: () => api<Resumen>(`/reportes/resumen${qs(filtros)}`),
   });
   const r = resumen.data;
+  const { puede } = useAuth();
+  const aPagar = useQuery({
+    queryKey: ["pagos-pendientes", {}],
+    queryFn: () => api<CuentasAPagar>("/pagos/pendientes"),
+    enabled: puede("facturas:leer"),
+  });
   const set = (k: keyof typeof filtros) => (e: { target: { value: string } }) =>
     setFiltros((f) => ({ ...f, [k]: e.target.value }));
 
@@ -56,6 +63,18 @@ export default function Dashboard() {
                   : "Todo al día"}
               </div>
             </div>
+            {aPagar.data && (
+              <div className="card">
+                <div className="kpi-label">A pagar</div>
+                <div className="kpi-value" style={{ color: Number(aPagar.data.vencido_pesos) ? "var(--critical-text)" : undefined }}>
+                  {pesos(aPagar.data.total_pesos)}
+                </div>
+                <div className="kpi-sub">
+                  {Number(aPagar.data.vencido_pesos) > 0 ? `${pesos(aPagar.data.vencido_pesos)} vencido · ` : ""}
+                  {pesos(aPagar.data.proximos_7_dias_pesos)} en 7 días · <Link to="/pagos">Ver →</Link>
+                </div>
+              </div>
+            )}
             <div className="card">
               <div className="kpi-label">Kilos despachados</div>
               <div className="kpi-value">{num(r.kilos_despachados)}</div>
